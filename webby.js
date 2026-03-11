@@ -20,9 +20,10 @@
   let statusTimer = null;
   let originalBodyPaddingTop = '';
   let autoSaveTimer = null;
+  let dirHandle = null; // FileSystemDirectoryHandle when folder access is granted
 
-  // Storage key is scoped to the file path so different sites don't collide
-  const DRAFT_KEY = '__webby_draft_' + location.pathname;
+  const FS_SUPPORTED = 'showDirectoryPicker' in window;
+  const DRAFT_KEY = '__webby_draft_' + location.pathname; // localStorage fallback key
 
   // ─── Toolbar ──────────────────────────────────────────────────────────────
 
@@ -122,47 +123,201 @@
     if (val) scheduleAutoSave();
   }
 
-  // ─── Draft persistence (localStorage) ────────────────────────────────────
+  // ─── File persistence ─────────────────────────────────────────────────────
+  //
+  // Primary path: File System Access API (Chrome/Edge/Safari)
+  //   - User selects their site folder once; handle is stored in IndexedDB.
+  //   - Auto-save writes index.html to disk; images are saved to assets/ locally.
+  //   - On reload the file itself has the latest content — nothing to restore.
+  //
+  // Fallback path: localStorage (Firefox and other unsupported browsers)
+  //   - Changes are cached in localStorage and restored on reload.
+  //   - A banner explains that Chrome/Edge/Safari gives a better experience.
 
   function scheduleAutoSave() {
     clearTimeout(autoSaveTimer);
-    autoSaveTimer = setTimeout(saveDraft, 1500);
+    autoSaveTimer = setTimeout(saveChanges, 1500);
   }
 
-  function saveDraft() {
-    try {
-      localStorage.setItem(DRAFT_KEY, serialize());
-    } catch (e) {
-      // localStorage unavailable or full — silent failure
+  async function saveChanges() {
+    if (dirHandle) {
+      await writeIndexToLocalFile();
+    } else {
+      writeDraftToCache();
     }
   }
 
-  function clearDraft() {
+  // ── File System Access path ──────────────────────────────────────────────
+
+  async function writeIndexToLocalFile() {
+    try {
+      const fh = await dirHandle.getFileHandle('index.html');
+      const writable = await fh.createWritable();
+      await writable.write(serialize());
+      await writable.close();
+    } catch (e) {
+      // Lost access (e.g. folder moved) — drop handle and fall back
+      dirHandle = null;
+      writeDraftToCache();
+      showAccessBanner();
+    }
+  }
+
+  async function writeImageToLocalDir(file) {
+    if (!dirHandle) return;
+    try {
+      const assetsDir = await dirHandle.getDirectoryHandle('assets', { create: true });
+      const fh = await assetsDir.getFileHandle(file.name, { create: true });
+      const writable = await fh.createWritable();
+      await writable.write(file);
+      await writable.close();
+    } catch (e) {
+      // Non-fatal — image is still on GitHub even if local write fails
+    }
+  }
+
+  // IndexedDB — persists FileSystemDirectoryHandle across sessions
+
+  function openHandleDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('__webby_fs', 1);
+      req.onupgradeneeded = e => e.target.result.createObjectStore('handles');
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function storeHandleInDB(handle) {
+    const db = await openHandleDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('handles', 'readwrite');
+      tx.objectStore('handles').put(handle, 'dir');
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async function loadHandleFromDB() {
+    const db = await openHandleDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('handles', 'readonly');
+      const req = tx.objectStore('handles').get('dir');
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function verifyPermission(handle) {
+    const opts = { mode: 'readwrite' };
+    if (await handle.queryPermission(opts) === 'granted') return true;
+    if (await handle.requestPermission(opts) === 'granted') return true;
+    return false;
+  }
+
+  // Called at init — silently restores folder access or shows the access banner
+  async function initFileAccess() {
+    if (!FS_SUPPORTED) {
+      showAccessBanner();
+      return;
+    }
+    try {
+      const stored = await loadHandleFromDB();
+      if (stored && await verifyPermission(stored)) {
+        dirHandle = stored;
+        return; // Silent success — folder is linked, auto-save is active
+      }
+    } catch (_) {}
+    showAccessBanner();
+  }
+
+  function showAccessBanner() {
+    if (document.getElementById('__webby-access-banner')) return;
+
+    const banner = el('div', { id: '__webby-access-banner', 'data-editor-ui': '' });
+    css(banner, {
+      position: 'fixed',
+      top: '44px',
+      left: '0',
+      right: '0',
+      zIndex: '999997',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+      padding: '7px 16px',
+      background: '#1e3655',
+      color: '#cbd5e1',
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '12px',
+      boxShadow: '0 2px 6px rgba(0,0,0,0.25)',
+      boxSizing: 'border-box',
+    });
+
+    const btnStyle = 'padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-family:inherit;';
+
+    if (!FS_SUPPORTED) {
+      banner.innerHTML = `
+        <span>⚠️ Your browser doesn't support saving directly to files. Use <strong>Chrome</strong> or <strong>Edge</strong> for the best experience. Your changes are saved in the browser for now.</span>
+        <button id="__webby-banner-dismiss" style="${btnStyle}background:transparent;border:1px solid rgba(255,255,255,0.25);color:#cbd5e1;">Dismiss</button>
+      `;
+    } else {
+      banner.innerHTML = `
+        <span style="flex:1">💾 <strong>Link your site folder</strong> so edits save directly to your files — nothing gets lost on reload.</span>
+        <button id="__webby-banner-grant" style="${btnStyle}background:#3b82f6;border:none;color:#fff;font-weight:600;">Select Folder</button>
+        <button id="__webby-banner-dismiss" style="${btnStyle}background:transparent;border:1px solid rgba(255,255,255,0.25);color:#cbd5e1;">Not now</button>
+      `;
+      banner.querySelector('#__webby-banner-grant').addEventListener('click', async () => {
+        try {
+          const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+          dirHandle = handle;
+          await storeHandleInDB(handle);
+          removeBanner();
+          // Immediately write current state to the newly linked folder
+          await writeIndexToLocalFile();
+          showStatus('Folder linked ✓ — edits now save to your files automatically');
+        } catch (e) {
+          if (e.name !== 'AbortError') showStatus('Could not access folder: ' + e.message, true);
+        }
+      });
+    }
+
+    banner.querySelector('#__webby-banner-dismiss').addEventListener('click', removeBanner);
+    document.body.insertBefore(banner, document.body.firstChild);
+
+    // Shift body down so the banner doesn't overlap content
+    const current = parseFloat(document.body.style.paddingTop) || 0;
+    document.body.style.paddingTop = (current + 36) + 'px';
+  }
+
+  function removeBanner() {
+    const banner = document.getElementById('__webby-access-banner');
+    if (!banner) return;
+    const current = parseFloat(document.body.style.paddingTop) || 0;
+    document.body.style.paddingTop = Math.max(0, current - 36) + 'px';
+    banner.remove();
+  }
+
+  // ── localStorage fallback path ───────────────────────────────────────────
+
+  function writeDraftToCache() {
+    try { localStorage.setItem(DRAFT_KEY, serialize()); } catch (_) {}
+  }
+
+  function clearDraftCache() {
     localStorage.removeItem(DRAFT_KEY);
   }
 
-  // Returns true if a draft was found and restored.
-  // Must be called before injectToolbar() so the restored body
-  // doesn't immediately get overwritten by editor UI injection.
-  function restoreDraft() {
+  // Restores from localStorage cache (fallback only). Returns true if restored.
+  function restoreFromCache() {
     const saved = localStorage.getItem(DRAFT_KEY);
     if (!saved) return false;
     try {
       const doc = new DOMParser().parseFromString(saved, 'text/html');
-
-      // Restore <style> block so theme changes survive reload
       const savedStyle = doc.querySelector('style');
       const liveStyle = document.querySelector('style');
-      if (savedStyle && liveStyle) {
-        liveStyle.textContent = savedStyle.textContent;
-      }
-
-      // Restore body content (zones, structure, any new/deleted sections)
+      if (savedStyle && liveStyle) liveStyle.textContent = savedStyle.textContent;
       document.body.innerHTML = doc.body.innerHTML;
       return true;
-    } catch (e) {
-      return false;
-    }
+    } catch (_) { return false; }
   }
 
   // ─── Zone Manager ─────────────────────────────────────────────────────────
@@ -379,12 +534,16 @@
       const path = `assets/${file.name}`;
       await github.uploadFile(path, b64);
 
-      // Show the image locally using a blob URL — the file only exists on GitHub,
-      // not in the local filesystem, so ./assets/... would 404 when opened via file://.
-      // The serializer swaps this back to the real relative path before publish/export.
-      const blobUrl = URL.createObjectURL(new Blob([buffer], { type: file.type }));
-      imgEl.src = blobUrl;
-      imgEl.dataset.webbySrc = `./${path}`;
+      if (dirHandle) {
+        // Folder is linked — save the image file locally so ./assets/... resolves correctly
+        await writeImageToLocalDir(file);
+        imgEl.src = `./${path}`;
+        imgEl.removeAttribute('data-webby-src');
+      } else {
+        // No local file access — display via blob URL; serializer swaps to relative path
+        imgEl.src = URL.createObjectURL(new Blob([buffer], { type: file.type }));
+        imgEl.dataset.webbySrc = `./${path}`;
+      }
 
       setDirty(true);
       showStatus('Image uploaded ✓');
@@ -659,7 +818,7 @@ RULES:
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     setDirty(false);
-    clearDraft();
+    clearDraftCache();
     showStatus('Exported ✓');
   }
 
@@ -743,7 +902,7 @@ RULES:
       const sha = await github.getFileSHA('index.html');
       await github.putFile('index.html', html, sha);
       setDirty(false);
-      clearDraft();
+      clearDraftCache();
       showStatus('Published ✓ — deploying…');
     } catch (err) {
       showStatus('Publish failed: ' + err.message, true);
@@ -1109,21 +1268,22 @@ RULES:
 
   // ─── Init ─────────────────────────────────────────────────────────────────
 
-  function init() {
-    // Restore before injecting toolbar so body content is correct when zones activate
-    const restored = restoreDraft();
+  async function init() {
+    // localStorage restore only applies in the fallback (no File System Access) path.
+    // When the folder is linked, the file on disk is always up to date — no restore needed.
+    if (!FS_SUPPORTED) {
+      const restored = restoreFromCache();
+      if (restored) setDirty(true);
+    }
 
     injectToolbar();
     activateZones();
     bindMutationObserver();
     bindLinkHandlers();
+    showStatus('Edit mode active');
 
-    if (restored) {
-      setDirty(true);
-      showStatus('Draft restored');
-    } else {
-      showStatus('Edit mode active');
-    }
+    // Async — silently re-links folder if previously granted, else shows banner
+    await initFileAccess();
   }
 
   if (document.readyState === 'loading') {
