@@ -10,46 +10,60 @@ The system has two distinct modes:
 
 ---
 
-## Repository Structure
+## Structure
+
+### Local folder (on the site owner's computer)
 
 ```
-site/
-├── index.html              ← Source of truth: content + CSS vars + structure
-├── secrets.js              ← Gitignored. Sets window.SITE_SECRETS (keys, repo)
-├── assets/
-│   └── *.jpg / *.png       ← Images committed alongside HTML
-├── .github/
-│   └── workflows/
-│       └── deploy.yml      ← On push to main → deploy to GitHub Pages
-└── .gitignore              ← Must include secrets.js
+my-site/
+├── index.html       ← Source of truth: content + CSS vars + structure
+├── secrets.js       ← Never published. Sets window.SITE_SECRETS (keys, repo)
+└── assets/
+    └── *.jpg / *.png
 ```
+
+This folder is **not** a git repository. Webby publishes `index.html` and uploads images directly to GitHub via the REST API. `secrets.js` never leaves the local machine.
+
+### Remote GitHub repository
+
+```
+username/repo-name  (GitHub)
+├── index.html
+└── assets/
+    └── *.jpg / *.png
+```
+
+GitHub Pages is configured to serve files directly from the root of the `main` branch ("Deploy from branch → main → / (root)"). Any push to `main` — including Webby's API commits — updates the live site automatically. No GitHub Actions workflow is required.
 
 ---
 
 ## The Editor Script (`webby.js`)
 
-Hosted externally (e.g. your own GitHub Pages or CDN). Included in `index.html` only during local editing — stripped from the exported/published output.
+Hosted externally (e.g. your own GitHub Pages). Included in `index.html` only during local editing — stripped from the published output.
 
 ### Initialization
 
 ```
-Webby.init()
-  ├── Check for window.SITE_SECRETS
-  ├── If absent → exit silently (public mode)
-  └── If present → activate edit mode
-        ├── injectToolbar()
-        ├── activateZones()
-        └── bindMutationObserver()
+init()  [async]
+  ├── If !FS_SUPPORTED (Firefox): restoreFromCache() → restore from localStorage
+  ├── injectToolbar()
+  ├── activateZones()
+  ├── bindMutationObserver()
+  ├── bindLinkHandlers()
+  └── initFileAccess()  [async]
+        ├── Load FileSystemDirectoryHandle from IndexedDB
+        ├── If found + permission granted → dirHandle = stored (silent)
+        └── Else → showAccessBanner()
 ```
 
 ### Required Globals (set by `secrets.js`)
 
 ```js
 window.SITE_SECRETS = {
-  anthropicKey: "sk-ant-...",   // For AI section generation
-  githubToken:  "ghp_...",      // Fine-grained PAT: contents read+write
-  repo:         "user/repo",    // e.g. "jane/jane-osteopathy"
-  branch:       "main"          // Deployment branch
+  geminiKey:   "AIza...",   // Google AI Studio API key — free at aistudio.google.com
+  githubToken: "ghp_...",   // Fine-grained PAT: contents read+write on the site repo
+  repo:        "user/repo", // e.g. "jane/jane-osteopathy"
+  branch:      "main"       // Deployment branch
 };
 ```
 
@@ -66,136 +80,188 @@ Responsible for identifying and activating editable regions.
 | Attribute | Purpose |
 |---|---|
 | `data-zone` | Marks a top-level editable section (e.g. `"hero"`, `"about"`) |
+| `data-zone-label` | Human-readable label shown in the delete confirmation |
 | `data-editable` | Text node is directly editable via `contenteditable` |
 | `data-editable-image` | Image can be replaced by clicking |
-| `data-zone-label` | Human-readable label shown in editor UI |
 
 **Functions:**
 
 ```
 activateZones()
   ├── Query all [data-zone] elements
-  ├── For each: add contenteditable to [data-editable] children
-  ├── For each: bind image click handlers on [data-editable-image]
-  ├── Inject "Add Section" button between each zone
-  └── Inject "Delete Section" button on each zone (with confirm guard)
+  ├── For each: activateZone(section)
+  │     ├── Add contenteditable + spellcheck to [data-editable] children
+  │     ├── Bind image click handlers on [data-editable-image]
+  │     └── Inject "Delete Section" button (visible on hover, with confirm guard)
+  └── injectAddSectionButtons()
+        └── Insert "Add Section" button before first zone and after each zone
+            (buttons are visible on hover of neighboring zones)
 
 deactivateZones()
-  ├── Remove all contenteditable attributes
-  ├── Remove all editor UI injections
-  └── Used before serialization
+  ├── Remove all contenteditable + spellcheck attributes
+  └── Remove all [data-editor-ui] injections
 ```
 
 ### 2. Toolbar
 
-Floating, fixed-position UI injected into the page in edit mode. Does not appear in exported HTML.
+Fixed-position bar injected at the top of the page in edit mode. Marked `data-editor-ui` so it is stripped on export/publish.
 
 **Elements:**
 
-- Site title / status indicator (clean / unsaved changes)
-- **Add Section** button → triggers AI section generation flow
+- Site title with `●` dirty indicator (unsaved changes)
+- Status message area (right of title)
+- **Theme** button → open/close CSS variable editor panel
 - **Export** button → download clean `index.html`
 - **Publish** button → commit to GitHub and trigger deploy
-- **Theme** button → open CSS variable editor panel
 
 **Functions:**
 
 ```
-injectToolbar()         ← Create and append toolbar DOM
-removeToolbar()         ← Remove before serialization
-showStatus(msg)         ← "Saved", "Publishing...", "Error: ..."
-setDirty(bool)          ← Toggle unsaved indicator
+injectToolbar()     ← Create and prepend toolbar; adjust body padding-top
+showStatus(msg)     ← Display temporary status text ("Published ✓", "Error: ...")
+setDirty(bool)      ← Toggle ● indicator; schedules auto-save when true
 ```
 
-### 3. Mutation Observer
+### 3. File Persistence
 
-Tracks changes to editable content for dirty-state management.
+Keeps `index.html` on disk in sync with the current DOM state. Two paths:
+
+**Primary — File System Access API (Chrome, Edge, Safari):**
+
+```
+initFileAccess()
+  ├── Load FileSystemDirectoryHandle from IndexedDB
+  ├── If found: verifyPermission() → if granted, silently re-link
+  └── If not found or denied: showAccessBanner()
+
+showAccessBanner()
+  └── Banner below toolbar: shows local path hint + "Select Folder" button
+        └── On click: showDirectoryPicker() → store handle → writeIndexToLocalFile()
+
+scheduleAutoSave()  ← Debounced 1.5s; triggered by setDirty(true)
+  └── writeIndexToLocalFile()
+        └── serialize({ local: true }) → write to index.html on disk
+
+writeImageToLocalDir(file)
+  └── Write to assets/ in the linked folder (called alongside GitHub upload)
+```
+
+**Fallback — localStorage (Firefox):**
+
+```
+writeDraftToCache()   ← serialize({ local: true }) → localStorage
+restoreFromCache()    ← Parse saved HTML → restore <style> + body.innerHTML
+clearDraftCache()     ← Called after successful publish or export
+```
+
+The `local: true` flag on `serialize()` preserves the `secrets.js` and `webby.js` script tags so edit mode activates correctly on the next open. The default `local: false` strips them for the deployed public site.
+
+### 4. Mutation Observer
+
+Tracks content changes for dirty-state management and auto-save triggering.
 
 ```
 bindMutationObserver()
   ├── Observe subtree of <body> for characterData + childList
-  ├── On change → setDirty(true)
-  └── On export/publish → setDirty(false)
+  ├── Ignore mutations originating from [data-editor-ui] elements
+  └── On relevant change → setDirty(true) → scheduleAutoSave()
 ```
 
-### 4. Image Manager
+### 5. Image Manager
 
 Handles image replacement without leaving the browser.
 
 **Flow:**
 
-1. User clicks an `[data-editable-image]` element
+1. User clicks a `[data-editable-image]` element (hover shows "Click to replace image" overlay)
 2. Hidden `<input type="file">` triggers file picker
 3. On file select:
-   - Read as ArrayBuffer
-   - Upload to `assets/` folder in GitHub repo via API
-   - Update `src` attribute of the `<img>` to `./assets/filename.ext`
-4. Image is committed to the repo and referenced by relative path (no base64)
+   - Read as ArrayBuffer → base64 encode
+   - Upload to `assets/` in GitHub repo via API
+   - **If folder is linked:** write file to local `assets/` directory; set `src` to `./assets/filename`
+   - **If no folder access:** display via blob URL locally; store `./assets/filename` in `data-webby-src`; serializer resolves on publish/export
 
 **Functions:**
 
 ```
-bindImageHandlers()
-  └── Attach click → openFilePicker() on all [data-editable-image]
+bindImageHandler(img)
+  └── Attach hover overlay + click → file picker → handleImageUpload()
 
-handleImageUpload(file, imgElement)
-  ├── Read file as ArrayBuffer
-  ├── base64Encode(buffer)
-  ├── github.uploadFile(`assets/${file.name}`, encoded)
-  └── imgElement.src = `./assets/${file.name}`
+handleImageUpload(file, imgEl)
+  ├── Read as ArrayBuffer
+  ├── base64Encode → github.uploadFile(`assets/${file.name}`)
+  ├── If dirHandle: writeImageToLocalDir(file) → imgEl.src = `./assets/${file.name}`
+  └── Else: imgEl.src = blobURL; imgEl.dataset.webbySrc = `./assets/${file.name}`
 ```
 
-### 5. AI Section Generator
+### 6. Link Editor
 
-Calls Anthropic API to generate a new themed section based on user description.
+Intercepts clicks on `<a>` elements inside `[data-zone]` and shows a popover editor.
 
 **Flow:**
 
-1. User clicks "Add Section" between two zones
-2. Modal prompts: *"Describe the section you want to add"*
+1. User clicks any link inside an editable zone
+2. Navigation is prevented; a positioned popover appears near the link
+3. Popover fields:
+   - **Display text** — updates `textContent` live
+   - **URL** — updates `href` live
+   - **Open in new tab** — toggles `target="_blank"` + `rel="noopener noreferrer"`
+   - **Remove link** — unwraps `<a>` leaving plain text
+4. Popover closes on "Done", on click outside, or when a new link is clicked
+
+```
+bindLinkHandlers()
+  └── document.addEventListener('click', handleLinkClick, true)  ← capture phase
+
+openLinkPopover(link)
+  └── Position near link → populate fields → bind live-update handlers
+```
+
+### 7. AI Section Generator
+
+Calls the Google Gemini API to generate a new themed section based on a user description.
+
+**Flow:**
+
+1. User hovers between sections → clicks **+ Add Section**
+2. Modal prompts for a description
 3. On submit:
    - Extract current `<style>` block from document
-   - Extract one existing `<section>` as a markup pattern example
-   - Construct prompt (see Prompt Template below)
-   - Stream response from Anthropic API
-   - Inject returned HTML into the DOM at the correct position
+   - Extract first `[data-zone]` section as a markup pattern example (editor UI stripped)
+   - Construct prompt and call Gemini API
+   - Parse returned HTML; inject into DOM at the correct position
    - Activate editing on the new zone
 
 **Functions:**
 
 ```
-promptAddSection(insertAfterElement)
-  └── Show modal → on submit → generateSection(description, insertAfterElement)
+promptAddSection(insertAfterZone)
+  └── Show modal → on submit → generateSection(description, insertAfterZone)
 
-generateSection(description, insertAfterElement)
+generateSection(description, insertAfterZone)
   ├── buildSectionPrompt(description)
-  ├── callAnthropicAPI(prompt)          ← streams response
-  ├── parseHTMLFromResponse(text)
-  ├── injectSection(html, insertAfterElement)
+  ├── callGeminiAPI(prompt)
+  ├── parseHTMLFromResponse(text)   ← strips markdown fences if present
+  ├── injectNewSection(html, insertAfterZone)
   └── activateZone(newSection)
 
 buildSectionPrompt(description)
   ├── Read current <style> block
-  ├── Read first [data-zone] section as example
+  ├── Clone first [data-zone] section (strip editor UI attributes)
   └── Return assembled prompt string
 ```
 
-**Anthropic API call:**
+**Gemini API call:**
 
 ```js
-fetch("https://api.anthropic.com/v1/messages", {
+fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
   method: "POST",
-  headers: {
-    "x-api-key": window.SITE_SECRETS.anthropicKey,
-    "anthropic-version": "2023-06-01",
-    "content-type": "application/json"
-  },
+  headers: { "content-type": "application/json" },
   body: JSON.stringify({
-    model: "claude-opus-4-5",
-    max_tokens: 2000,
-    messages: [{ role: "user", content: prompt }]
+    contents: [{ parts: [{ text: prompt }] }]
   })
 })
+// Response: data.candidates[0].content.parts[0].text
 ```
 
 **Section prompt template:**
@@ -208,7 +274,7 @@ STYLE CONTEXT (CSS variables and base styles in use):
 {currentStyleBlock}
 </style>
 
-EXISTING SECTION EXAMPLE (match this markup style and class patterns):
+EXISTING SECTION EXAMPLE (match this markup style and class patterns exactly):
 {exampleSection}
 
 TASK:
@@ -218,78 +284,83 @@ Generate a single <section> element for the following description:
 RULES:
 - Use only the CSS variables already defined above
 - Match the class naming conventions in the example
-- Include data-zone="{slug}" and data-zone-label="{label}" on the section
+- Include data-zone="{slug}" and data-zone-label="{Human Label}" on the section
 - Add data-editable on all user-editable text elements
-- Add data-editable-image on any img elements
-- Return ONLY the raw HTML section element, no explanation, no markdown fences
+- Add data-editable-image on any img elements; use src="./assets/placeholder.jpg"
+- Return ONLY the raw <section> element, no explanation, no markdown fences
 ```
 
-### 6. Serializer / Exporter
+### 8. Serializer / Exporter
 
-Produces clean, deployment-ready HTML from the current DOM state.
-
-**Export process:**
+Produces clean HTML from the current DOM state. Two modes:
 
 ```
-serialize()
+serialize({ local: false })   ← default; for publish/export
+serialize({ local: true })    ← for local file save and localStorage cache
+
+Both modes:
   ├── Clone document.documentElement
-  ├── Remove all [data-editor-ui] elements (toolbar, modals, buttons)
-  ├── Remove all contenteditable attributes
-  ├── Remove <script src="./secrets.js"> tag
-  ├── Remove <script src="{editor-script-url}"> tag
-  ├── Normalize whitespace in text nodes
-  ├── Serialize to HTML string via XMLSerializer or innerHTML
-  └── Return clean HTML string
+  ├── Remove all [data-editor-ui] elements (toolbar, modals, add/delete buttons, hints)
+  ├── Remove contenteditable + spellcheck attributes
+  ├── Resolve img[data-webby-src]: replace blob URL src with stored relative path
+  └── Restore original body padding-top (remove toolbar offset)
+
+local: false only:
+  └── Remove <script src="./secrets.js"> and <script src="...webby.js"> tags
 
 exportToFile()
-  ├── html = serialize()
-  ├── blob = new Blob([html], { type: "text/html" })
-  └── Trigger download as "index.html"
+  ├── serialize({ local: false })
+  ├── Trigger download as "index.html"
+  └── clearDraftCache()
 ```
 
-**Important:** The serializer must be idempotent — running it multiple times on the same DOM produces the same output.
+**Important:** The serializer is idempotent — running it multiple times on the same DOM produces the same output.
 
-### 7. GitHub Publisher
+### 9. GitHub Publisher
 
-Commits `index.html` and any newly uploaded images to the GitHub repo via REST API. Triggers GitHub Actions deployment automatically on push.
-
-**Functions:**
+Pushes `index.html` and uploaded images to the GitHub repo via REST API. Triggers GitHub Actions deployment automatically on push.
 
 ```
-publish()
-  ├── html = serialize()
+publishSite()
+  ├── serialize({ local: false })
   ├── sha = await github.getFileSHA("index.html")
   ├── await github.putFile("index.html", html, sha)
-  └── showStatus("Published ✓ — deploying...")
+  ├── clearDraftCache()
+  └── showStatus("Published ✓ — deploying…")
 
 github.getFileSHA(path)
-  └── GET /repos/{repo}/contents/{path}
-        └── return .sha
+  └── GET /repos/{repo}/contents/{path}?ref={branch} → return .sha (null if 404)
 
 github.putFile(path, content, sha)
   └── PUT /repos/{repo}/contents/{path}
-        body: {
-          message: "Update site content",
-          content: btoa(unescape(encodeURIComponent(content))),
-          sha: sha,       ← omit for new files
-          branch: branch
-        }
+        body: { message, content: btoa(unescape(encodeURIComponent(content))), sha, branch }
 
 github.uploadFile(path, base64Content)
-  └── Calls putFile with pre-encoded binary content (images)
+  └── getFileSHA(path) → putFile with pre-encoded binary (for images)
+```
+
+### 10. Theme Editor
+
+Panel that parses CSS custom properties from the `<style>` block and exposes them as live inputs.
+
+```
+openThemeEditor()   ← toggled by "Theme" toolbar button
+  ├── Parse --variable: value pairs from <style> via regex
+  ├── Group into: Colors / Typography / Spacing / Layout
+  ├── Render color pickers (for hex/rgb/hsl values) or text inputs
+  └── On input: document.documentElement.style.setProperty() + patch <style> textContent
 ```
 
 ---
 
 ## CSS Variable System
 
-The base style block in `index.html` must define CSS custom properties so AI-generated sections can use them consistently.
+The base `<style>` block in `index.html` must define CSS custom properties so AI-generated sections can use them consistently.
 
 **Required variables (minimum set):**
 
 ```css
 :root {
-  /* Palette */
   --color-primary:    #...;
   --color-secondary:  #...;
   --color-accent:     #...;
@@ -298,20 +369,17 @@ The base style block in `index.html` must define CSS custom properties so AI-gen
   --color-text:       #...;
   --color-text-muted: #...;
 
-  /* Typography */
   --font-heading: 'Font Name', sans-serif;
   --font-body:    'Font Name', sans-serif;
   --font-size-base: 1rem;
   --line-height-base: 1.6;
 
-  /* Spacing */
   --space-xs:  0.25rem;
   --space-sm:  0.5rem;
   --space-md:  1rem;
   --space-lg:  2rem;
   --space-xl:  4rem;
 
-  /* Layout */
   --container-width: 1100px;
   --radius:          0.375rem;
   --shadow:          0 2px 12px rgba(0,0,0,0.08);
@@ -320,39 +388,24 @@ The base style block in `index.html` must define CSS custom properties so AI-gen
 
 ---
 
-## GitHub Actions Deploy Workflow
+## Secrets & Security Notes
 
-`.github/workflows/deploy.yml`:
-
-```yaml
-name: Deploy to GitHub Pages
-on:
-  push:
-    branches: [main]
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v4
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: '.'
-      - uses: actions/deploy-pages@v4
-```
+- `secrets.js` lives only on the local machine — the site folder is not a git repo and `secrets.js` is never committed or transmitted anywhere except directly to the GitHub and Google APIs
+- The GitHub PAT should be a **fine-grained token** scoped to the single site repo with `contents: read+write` only
+- The Gemini API key is used **client-side** — acceptable for personal/single-owner use; for shared or public use, proxy through a serverless function
+- The exported/published HTML contains **no credentials** and **no editor code**
 
 ---
 
-## Secrets & Security Notes
+## Browser Compatibility
 
-- `secrets.js` is **gitignored** — never committed
-- The GitHub PAT should be a **fine-grained token** scoped to the single repo with `contents: read+write` only
-- The Anthropic key is used **client-side** — acceptable for personal use; for shared use, proxy through a serverless function
-- The exported/published HTML contains **no credentials** and **no editor code**
+| Feature | Chrome | Edge | Safari | Firefox |
+|---|---|---|---|---|
+| Full edit mode | ✓ | ✓ | ✓ | ✓ |
+| Local file auto-save | ✓ | ✓ | ✓ | ✗ |
+| localStorage fallback | — | — | — | ✓ |
+
+Chrome or Edge recommended for the best experience. Firefox users must use **Export** to download the updated `index.html` and replace the local file manually.
 
 ---
 
@@ -361,5 +414,4 @@ jobs:
 - Multi-user editing or auth
 - Rich text formatting toolbar (bold, italic, etc.) — plain `contenteditable` only
 - Version history UI (git history serves this purpose)
-- Offline support
 - Any server-side component

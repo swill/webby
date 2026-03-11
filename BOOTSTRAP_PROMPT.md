@@ -120,13 +120,17 @@ Once you have `index.html`:
    };
    ```
 
-3. **Open `index.html` in your browser** — edit mode should activate automatically.
+3. **Open `index.html` in Chrome, Edge, or Safari** — edit mode activates automatically.
 
-4. Replace placeholder text by clicking and typing directly on the page.
+   > Firefox works but doesn't support saving back to the local file. Use Chrome or Edge for the best experience.
 
-5. Replace placeholder images by clicking on any image.
+4. **Link your site folder** — a banner will appear below the toolbar. Click **Select Folder** and choose the folder containing `index.html`. The path is shown in the banner as a hint. Once linked, every edit saves automatically to your local file.
 
-6. Click **Publish** when ready.
+5. Replace placeholder text by clicking and typing directly on the page.
+
+6. Replace placeholder images by clicking on any image.
+
+7. Click **Publish** when ready.
 
 ---
 

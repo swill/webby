@@ -29,7 +29,8 @@ Use the [Bootstrap Prompt](./BOOTSTRAP_PROMPT.md) with Claude.ai (attach 2–5 i
 2. Go to **Settings → Pages**
 3. Under *Source*, select **Deploy from a branch**
 4. Set branch to `main`, folder to `/ (root)`, and click **Save**
-5. Add the GitHub Actions deploy workflow below (`.github/workflows/deploy.yml`) — this is what runs automatically every time Webby publishes your site
+
+That's it — GitHub Pages will serve files directly from the root of your `main` branch. Every time Webby pushes `index.html`, the live site updates automatically. No workflow files or GitHub Actions needed.
 
 ### 3. Add `secrets.js` to your local site folder
 
@@ -48,20 +49,29 @@ Get your free Gemini API key at [aistudio.google.com](https://aistudio.google.co
 
 ### 4. Open `index.html` in your browser
 
+> **Use Chrome, Edge, or Safari.** These browsers support the File System Access API, which lets Webby save your edits directly back to `index.html` on disk. Firefox works but requires you to manually export and replace the file after each session.
+
 The editor activates automatically. You'll see a dark toolbar at the top of the page.
 
-### 5. Edit your content
+### 5. Link your site folder
+
+A banner will appear below the toolbar on first open. Click **Select Folder** and choose the folder containing your `index.html`. The path is shown in the banner as a hint.
+
+Once linked, every edit auto-saves to your local `index.html` within 1.5 seconds — so your changes are never lost on reload or restart. The folder stays linked across sessions (one browser permission prompt per session).
+
+### 6. Edit your content
 
 - **Text** — click any text and type directly on the page
-- **Images** — click any image to open a file picker; the new image uploads to GitHub automatically
+- **Links** — click any link to edit its display text, URL, or open-in-new-tab setting
+- **Images** — click any image to replace it; the new image saves to your local `assets/` folder and uploads to GitHub automatically
 - **New sections** — hover between sections and click **+ Add Section**; describe what you want and the AI generates it
 - **Theme** — click **Theme** to adjust colours, fonts, and spacing live
 
-### 6. Publish
+### 7. Publish
 
-Click **Publish** in the toolbar. Webby uses the GitHub API to push `index.html` directly to your repository — no git, no terminal, no syncing. GitHub Actions picks up the push and deploys to GitHub Pages within ~60 seconds.
+Click **Publish** in the toolbar. Webby uses the GitHub API to push `index.html` directly to your repository — no git, no terminal, no syncing. GitHub Pages serves the updated file within ~60 seconds.
 
-> **How it works under the hood:** Webby serialises the current page (stripping all editor UI and credentials), then calls the GitHub Contents API to write the file. Only `index.html` is updated; everything else in your repo (images, workflow files, etc.) is untouched unless you explicitly replaced an image during editing.
+> **How it works under the hood:** Webby serialises the current page (stripping all editor UI and credentials), then calls the GitHub Contents API to write the file. Images you replaced during editing are also committed to `assets/` in your repo.
 
 ---
 
@@ -101,34 +111,6 @@ Replace `YOUR_GITHUB_PAGES_URL` with the URL where you host `webby.js` (see [Hos
 
 ---
 
-## GitHub Actions deploy workflow
-
-Add this file to your site repo to enable automatic deployment:
-
-`.github/workflows/deploy.yml`
-
-```yaml
-name: Deploy to GitHub Pages
-on:
-  push:
-    branches: [main]
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v4
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: '.'
-      - uses: actions/deploy-pages@v4
-```
-
----
 
 ## Hosting webby.js
 
@@ -152,7 +134,7 @@ Pinned versioned files (e.g. `webby-1.0.0.js`) are committed alongside `webby.js
 
 ## Versioning
 
-The current version is `v1.0.0`.
+Check for the latest version in the root directory.
 
 Versions follow [Semantic Versioning](https://semver.org/):
 
@@ -163,7 +145,7 @@ Versions follow [Semantic Versioning](https://semver.org/):
 The version is accessible at runtime:
 
 ```js
-console.log(window.Webby.version); // "1.0.0"
+console.log(window.Webby.version);
 ```
 
 ---
