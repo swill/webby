@@ -1,10 +1,13 @@
 /**
- * webby.js — Zero-dependency browser-based site editor
+ * webby.js — v1.0.0
+ * Zero-dependency browser-based site editor.
  * Activates only when window.SITE_SECRETS is present (local edit mode).
  * Stripped from exported/published HTML automatically.
  */
 (function () {
   'use strict';
+
+  const VERSION = '1.0.0';
 
   if (!window.SITE_SECRETS) return;
 
@@ -893,6 +896,6 @@ RULES:
     init();
   }
 
-  window.Webby = { serialize, exportToFile, publish: publishSite };
+  window.Webby = { version: VERSION, serialize, exportToFile, publish: publishSite };
 
 })();
