@@ -19,6 +19,10 @@
   let mutationObserver = null;
   let statusTimer = null;
   let originalBodyPaddingTop = '';
+  let autoSaveTimer = null;
+
+  // Storage key is scoped to the file path so different sites don't collide
+  const DRAFT_KEY = '__webby_draft_' + location.pathname;
 
   // ─── Toolbar ──────────────────────────────────────────────────────────────
 
@@ -114,8 +118,51 @@
   function setDirty(val) {
     isDirty = val;
     const titleEl = document.getElementById('__webby-title');
-    if (!titleEl) return;
-    titleEl.textContent = (val ? '● ' : '') + (document.title || 'Site Editor');
+    if (titleEl) titleEl.textContent = (val ? '● ' : '') + (document.title || 'Site Editor');
+    if (val) scheduleAutoSave();
+  }
+
+  // ─── Draft persistence (localStorage) ────────────────────────────────────
+
+  function scheduleAutoSave() {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(saveDraft, 1500);
+  }
+
+  function saveDraft() {
+    try {
+      localStorage.setItem(DRAFT_KEY, serialize());
+    } catch (e) {
+      // localStorage unavailable or full — silent failure
+    }
+  }
+
+  function clearDraft() {
+    localStorage.removeItem(DRAFT_KEY);
+  }
+
+  // Returns true if a draft was found and restored.
+  // Must be called before injectToolbar() so the restored body
+  // doesn't immediately get overwritten by editor UI injection.
+  function restoreDraft() {
+    const saved = localStorage.getItem(DRAFT_KEY);
+    if (!saved) return false;
+    try {
+      const doc = new DOMParser().parseFromString(saved, 'text/html');
+
+      // Restore <style> block so theme changes survive reload
+      const savedStyle = doc.querySelector('style');
+      const liveStyle = document.querySelector('style');
+      if (savedStyle && liveStyle) {
+        liveStyle.textContent = savedStyle.textContent;
+      }
+
+      // Restore body content (zones, structure, any new/deleted sections)
+      document.body.innerHTML = doc.body.innerHTML;
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   // ─── Zone Manager ─────────────────────────────────────────────────────────
@@ -612,6 +659,7 @@ RULES:
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     setDirty(false);
+    clearDraft();
     showStatus('Exported ✓');
   }
 
@@ -695,6 +743,7 @@ RULES:
       const sha = await github.getFileSHA('index.html');
       await github.putFile('index.html', html, sha);
       setDirty(false);
+      clearDraft();
       showStatus('Published ✓ — deploying…');
     } catch (err) {
       showStatus('Publish failed: ' + err.message, true);
@@ -1061,11 +1110,20 @@ RULES:
   // ─── Init ─────────────────────────────────────────────────────────────────
 
   function init() {
+    // Restore before injecting toolbar so body content is correct when zones activate
+    const restored = restoreDraft();
+
     injectToolbar();
     activateZones();
     bindMutationObserver();
     bindLinkHandlers();
-    showStatus('Edit mode active');
+
+    if (restored) {
+      setDirty(true);
+      showStatus('Draft restored');
+    } else {
+      showStatus('Edit mode active');
+    }
   }
 
   if (document.readyState === 'loading') {
