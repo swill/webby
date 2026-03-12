@@ -372,6 +372,7 @@
     });
     injectDeleteButton(section);
     injectReformatButton(section);
+    injectAnchorButton(section);
   }
 
   function deactivateZones() {
@@ -380,6 +381,90 @@
       node.removeAttribute('spellcheck');
     });
     document.querySelectorAll('[data-editor-ui]').forEach(el => el.remove());
+  }
+
+  function injectAnchorButton(section) {
+    const slug = section.dataset.zone;
+    if (!slug) return;
+
+    // Ensure the section has a matching id so the anchor works when deployed
+    if (!section.id) section.id = slug;
+
+    const btn = el('button', { 'data-editor-ui': '' });
+    btn.textContent = '#';
+    css(btn, {
+      position: 'absolute',
+      top: '50%',
+      left: '-32px',
+      transform: 'translateY(-50%)',
+      zIndex: '1000',
+      width: '24px',
+      height: '24px',
+      padding: '0',
+      background: 'rgba(30,30,50,0.75)',
+      color: '#e8e8f0',
+      border: 'none',
+      borderRadius: '4px',
+      cursor: 'pointer',
+      fontSize: '13px',
+      fontWeight: '700',
+      lineHeight: '24px',
+      textAlign: 'center',
+      opacity: '0',
+      transition: 'opacity 0.15s',
+      pointerEvents: 'none',
+    });
+
+    // Tooltip
+    const tip = el('span', { 'data-editor-ui': '' });
+    tip.textContent = 'Copied!';
+    css(tip, {
+      position: 'absolute',
+      top: '50%',
+      left: '28px',
+      transform: 'translateY(-50%)',
+      background: 'rgba(30,30,50,0.85)',
+      color: '#fff',
+      fontSize: '10px',
+      padding: '2px 7px',
+      borderRadius: '4px',
+      whiteSpace: 'nowrap',
+      opacity: '0',
+      transition: 'opacity 0.15s',
+      pointerEvents: 'none',
+    });
+    btn.appendChild(tip);
+
+    section.addEventListener('mouseenter', () => {
+      // Position outside if there's room, otherwise tuck inside the section
+      const leftSpace = section.getBoundingClientRect().left;
+      if (leftSpace >= 40) {
+        btn.style.left = '-32px';
+        tip.style.left = '28px';
+      } else {
+        btn.style.left = '10px';
+        tip.style.left = '38px';
+      }
+      btn.style.opacity = '1';
+      btn.style.pointerEvents = 'auto';
+    });
+    section.addEventListener('mouseleave', () => {
+      btn.style.opacity = '0';
+      btn.style.pointerEvents = 'none';
+    });
+
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      navigator.clipboard.writeText('#' + section.id).then(() => {
+        tip.style.opacity = '1';
+        setTimeout(() => { tip.style.opacity = '0'; }, 1500);
+      });
+    });
+
+    if (getComputedStyle(section).position === 'static') {
+      section.style.position = 'relative';
+    }
+    section.appendChild(btn);
   }
 
   function injectDeleteButton(section) {
@@ -1950,26 +2035,50 @@ RULES:
       /^rgba?\(/.test(trimmed) ||
       /^hsla?\(/.test(trimmed);
 
-    let input;
     if (isColor) {
-      input = el('input');
-      input.type = 'color';
-      input.value = toHex(trimmed);
-      css(input, { width: '36px', height: '26px', padding: '1px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer' });
+      const hexVal = toHex(trimmed);
+
+      const picker = el('input');
+      picker.type = 'color';
+      picker.value = hexVal;
+      css(picker, { width: '28px', height: '26px', padding: '1px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', flexShrink: '0' });
+
+      const hexInput = el('input');
+      hexInput.type = 'text';
+      hexInput.value = hexVal;
+      css(hexInput, { width: '72px', padding: '3px 6px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace', flexShrink: '0' });
+
+      const apply = val => {
+        document.documentElement.style.setProperty(varName, val);
+        updateStyleVar(styleEl, varName, val);
+        setDirty(true);
+      };
+      picker.addEventListener('input', () => {
+        hexInput.value = picker.value;
+        apply(picker.value);
+      });
+      hexInput.addEventListener('input', () => {
+        const val = hexInput.value.trim();
+        if (/^#[0-9a-f]{6}$/i.test(val)) {
+          picker.value = val;
+          apply(val);
+        }
+      });
+
+      row.append(label, picker, hexInput);
     } else {
-      input = el('input');
+      const input = el('input');
       input.type = 'text';
       input.value = trimmed;
       css(input, { width: '110px', padding: '3px 7px', border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace' });
+      input.addEventListener('input', () => {
+        document.documentElement.style.setProperty(varName, input.value);
+        updateStyleVar(styleEl, varName, input.value);
+        setDirty(true);
+      });
+      row.append(label, input);
     }
 
-    input.addEventListener('input', () => {
-      document.documentElement.style.setProperty(varName, input.value);
-      updateStyleVar(styleEl, varName, input.value);
-      setDirty(true);
-    });
-
-    row.append(label, input);
     return row;
   }
 
