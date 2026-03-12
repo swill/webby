@@ -345,10 +345,22 @@
     injectAddSectionButtons();
   }
 
+  function preventBlockOnEnter(e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    // execCommand('insertLineBreak') inserts <br> and positions the cursor correctly,
+    // avoiding the <div>-wrapping that browsers default to in contenteditable.
+    document.execCommand('insertLineBreak');
+  }
+
   function activateZone(section) {
     section.querySelectorAll('[data-editable]').forEach(node => {
       node.contentEditable = 'true';
       node.setAttribute('spellcheck', 'true');
+      // Browsers (especially Chrome) insert <div> on Enter inside contenteditable,
+      // which breaks styling and leaves new content without data-editable.
+      // Force <br> instead so inline text elements stay flat.
+      node.addEventListener('keydown', preventBlockOnEnter);
     });
     // Bind image handlers to ALL images in the zone — not just those with
     // data-editable-image, so bootstrap-generated images are always editable.
