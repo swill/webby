@@ -23,6 +23,8 @@ The content "database" is the HTML file itself. The site owner edits text by cli
 
 Use the [Bootstrap Prompt](./BOOTSTRAP_PROMPT.md) with Claude.ai (attach 2–5 inspiration images and fill in the bracketed fields). The output is a complete `index.html` ready to use.
 
+Download the `index.html` file to a folder on your computer where you would like your website editing to live.  An `assets` folder will also be created in this location.
+
 ### 2. Create a GitHub repository and enable GitHub Pages
 
 1. Create a new **public** repository on GitHub (e.g. `jane/jane-osteopathy`)
@@ -33,7 +35,7 @@ Use the [Bootstrap Prompt](./BOOTSTRAP_PROMPT.md) with Claude.ai (attach 2–5 i
 
 That's it — GitHub Pages will serve files directly from the root of your `main` branch. Every time Webby pushes `index.html`, the live site updates automatically. No workflow files or GitHub Actions needed.
 
-### 3. Add `secrets.js` to your local site folder
+### 3. Add `secrets.js` to the same folder you saved `index.html`
 
 ```js
 window.SITE_SECRETS = {
@@ -50,7 +52,7 @@ Get your free Gemini API key at [aistudio.google.com](https://aistudio.google.co
 
 ### 4. Open `index.html` in your browser
 
-> **Use Chrome, Edge, or Safari.** These browsers support the File System Access API, which lets Webby save your edits directly back to `index.html` on disk. Firefox works but requires you to manually export and replace the file after each session.
+> **Use Chrome or Edge** since these browsers support the File System Access API, which lets Webby save your edits directly back to `index.html` on disk. Firefox and Safari works but requires you to manually export and replace the file after each session.
 
 The editor activates automatically. You'll see a dark toolbar at the top of the page.
 
@@ -66,6 +68,8 @@ Once linked, every edit auto-saves to your local `index.html` within 1.5 seconds
 - **Links** — click any link to edit its display text, URL, or open-in-new-tab setting
 - **Images** — click any image to replace it; the new image saves to your local `assets/` folder and uploads to GitHub automatically
 - **New sections** — hover between sections and click **+ Add Section**; describe what you want and the AI generates it
+- **Reformat sections** — if you want to change the format with AI, while keeping the content you have developed
+- **Delete sections** — that are no longer relevant
 - **Theme** — click **Theme** to adjust colours, fonts, and spacing live
 
 ### 7. Publish
@@ -130,6 +134,20 @@ https://<your-username>.github.io/<this-repo>/webby-1.0.0.js
 Pinned versioned files (e.g. `webby-1.0.0.js`) are committed alongside `webby.js` on each release and are never modified after publishing.
 
 > **One-time setup required:** Go to **Settings → Pages → Source → Deploy from a branch**, set branch to `main`, folder to `/ (root)`, and save. After that, `make release` keeps the live files up to date automatically — no further configuration needed.
+
+---
+
+## Reference my version
+
+**Latest version** (the bleeding edge)
+```
+https://swill.github.io/webby/webby.js
+```
+
+**Pinned version** (recommended for production — immune to breaking changes):
+```
+https://swill.github.io/webby/webby-x.y.z.js
+```
 
 ---
 
