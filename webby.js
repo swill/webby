@@ -585,12 +585,24 @@
   async function reformatSection(section, description) {
     const prompt = buildReformatPrompt(section, description);
     const responseText = await callGeminiAPI(prompt);
-    const html = parseHTMLFromResponse(responseText);
+    const { css, html } = parseSectionResponse(responseText);
 
+    if (!html) throw new Error('AI returned no valid HTML element.');
     const tmp = document.createElement('div');
     tmp.innerHTML = html;
-    const newSection = tmp.firstElementChild;
+    const newSection = tmp.querySelector('section');
     if (!newSection) throw new Error('AI returned no valid HTML element.');
+
+    // Upsert a dedicated style element keyed to this section's zone slug
+    const slug = section.dataset.zone || ('section-' + Date.now());
+    const styleId = '__webby-section-' + slug + '-styles';
+    let sectionStyleEl = document.getElementById(styleId);
+    if (!sectionStyleEl) {
+      sectionStyleEl = document.createElement('style');
+      sectionStyleEl.id = styleId;
+      document.head.appendChild(sectionStyleEl);
+    }
+    if (css) sectionStyleEl.textContent = css;
 
     section.replaceWith(newSection);
     activateZone(newSection);
@@ -598,9 +610,23 @@
     setDirty(true);
   }
 
+  function parseSectionResponse(text) {
+    const cssMatch  = text.match(/<section-css>([\s\S]*?)<\/section-css>/);
+    const htmlMatch = text.match(/<section-html>([\s\S]*?)<\/section-html>/);
+    return {
+      css:  cssMatch  ? cssMatch[1].trim()  : '',
+      html: htmlMatch ? htmlMatch[1].trim() : text.trim(), // fallback: treat whole response as HTML
+    };
+  }
+
   function buildReformatPrompt(section, description) {
     const styleEl = document.querySelector('style');
     const styleBlock = styleEl ? styleEl.textContent : '';
+
+    // Include any existing section-specific styles so AI can build on them
+    const slug = section.dataset.zone || '';
+    const existingStyleEl = slug ? document.getElementById('__webby-section-' + slug + '-styles') : null;
+    const existingSectionCSS = existingStyleEl ? existingStyleEl.textContent : '';
 
     // Clean copy of the section — strip editor UI before sending to AI
     const clone = section.cloneNode(true);
@@ -609,13 +635,12 @@
     clone.querySelectorAll('[spellcheck]').forEach(el => el.removeAttribute('spellcheck'));
     clone.querySelectorAll('[data-webby-bound]').forEach(el => el.removeAttribute('data-webby-bound'));
 
-    return `You are reformatting an existing HTML section for a website.
+    return `You are reformatting an existing HTML section for a website — both its HTML structure and its CSS.
 
-STYLE CONTEXT (CSS variables and base styles in use):
-<style>
+CSS VARIABLES IN USE (use these, never hardcode colours or sizes):
 ${styleBlock}
-</style>
 
+${existingSectionCSS ? `EXISTING SECTION-SPECIFIC CSS (currently in a separate style block):\n${existingSectionCSS}\n` : ''}
 EXISTING SECTION HTML (reformat this):
 ${clone.outerHTML}
 
@@ -624,11 +649,19 @@ REFORMAT INSTRUCTION:
 
 RULES:
 - Preserve ALL existing text content, images, and links exactly as-is unless the instruction explicitly says to change them
-- Only change HTML structure, CSS classes, layout, and responsive behaviour
-- Use only the CSS variables already defined in the style context — no hardcoded colours or sizes
+- You may freely change HTML structure, CSS classes, layout, responsive behaviour, and media queries
+- Use only the CSS variables defined above — no hardcoded colours or font sizes
 - Keep data-zone and data-zone-label attributes on the <section> element
 - Keep data-editable on all text elements and data-editable-image on all img elements
-- Return ONLY the reformatted <section> element — no explanation, no markdown fences, nothing else`;
+- Return your response in EXACTLY this format with no other text:
+
+<section-css>
+/* all CSS needed for this section, including media queries */
+</section-css>
+
+<section-html>
+<section>...</section>
+</section-html>`;
   }
 
   // ─── Nav Editor ───────────────────────────────────────────────────────────
