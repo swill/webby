@@ -447,6 +447,16 @@
       btn.style.pointerEvents = 'none';
     });
 
+    // Highlight the section outline while hovering the reformat button
+    btn.addEventListener('mouseenter', () => {
+      section.style.outline = '2px solid rgba(59,130,246,0.6)';
+      section.style.outlineOffset = '-2px';
+    });
+    btn.addEventListener('mouseleave', () => {
+      section.style.outline = '';
+      section.style.outlineOffset = '';
+    });
+
     btn.addEventListener('click', e => {
       e.stopPropagation();
       promptReformatSection(section);
