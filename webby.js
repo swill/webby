@@ -1333,6 +1333,16 @@ RULES:
     });
   }
 
+  function upsertMetaTag(name, content) {
+    let tag = document.querySelector(`meta[name="${name}"]`);
+    if (!tag) {
+      tag = document.createElement('meta');
+      tag.name = name;
+      document.head.appendChild(tag);
+    }
+    tag.setAttribute('content', content);
+  }
+
   function upsertFaviconLinks(href) {
     const head = document.head;
 
@@ -1543,7 +1553,104 @@ RULES:
     });
 
     faviconRow.append(faviconPreview, faviconMeta);
-    faviconSection.append(faviconTitle, faviconRow, faviconInput);
+
+    // Page title row
+    const titleRow = el('div');
+    css(titleRow, { marginTop: '12px' });
+
+    const titleLabel = el('label');
+    titleLabel.textContent = 'Page title';
+    css(titleLabel, { display: 'block', fontSize: '11px', color: '#374151', fontWeight: '600', marginBottom: '4px' });
+
+    const titleInput = el('input');
+    titleInput.type = 'text';
+    titleInput.value = document.title || '';
+    titleInput.placeholder = 'My Site';
+    css(titleInput, {
+      width: '100%',
+      boxSizing: 'border-box',
+      padding: '5px 8px',
+      border: '1px solid #d1d5db',
+      borderRadius: '4px',
+      fontSize: '12px',
+      fontFamily: 'inherit',
+    });
+    titleInput.addEventListener('input', () => {
+      document.title = titleInput.value;
+      const titleEl = document.querySelector('title');
+      if (titleEl) titleEl.textContent = titleInput.value;
+      // Also update the toolbar site name if present
+      const toolbarTitle = document.getElementById('__webby-title');
+      if (toolbarTitle) toolbarTitle.textContent = titleInput.value || 'Site Editor';
+      setDirty(true);
+    });
+
+    titleRow.append(titleLabel, titleInput);
+
+    // Description row
+    const descRow = el('div');
+    css(descRow, { marginTop: '12px' });
+
+    const descLabel = el('label');
+    descLabel.textContent = 'Meta description';
+    css(descLabel, { display: 'block', fontSize: '11px', color: '#374151', fontWeight: '600', marginBottom: '4px' });
+
+    const existingDesc = document.querySelector('meta[name="description"]');
+    const descInput = el('textarea');
+    descInput.value = existingDesc ? (existingDesc.getAttribute('content') || '') : '';
+    descInput.placeholder = 'A short description of the site for search engines (150–160 characters)';
+    css(descInput, {
+      width: '100%',
+      boxSizing: 'border-box',
+      padding: '5px 8px',
+      border: '1px solid #d1d5db',
+      borderRadius: '4px',
+      fontSize: '12px',
+      fontFamily: 'inherit',
+      resize: 'vertical',
+      height: '62px',
+    });
+    descInput.addEventListener('input', () => {
+      upsertMetaTag('description', descInput.value);
+      setDirty(true);
+    });
+
+    descRow.append(descLabel, descInput);
+
+    // Keywords row
+    const kwRow = el('div');
+    css(kwRow, { marginTop: '12px' });
+
+    const kwLabel = el('label');
+    kwLabel.textContent = 'Keywords';
+    css(kwLabel, { display: 'block', fontSize: '11px', color: '#374151', fontWeight: '600', marginBottom: '4px' });
+
+    const kwHint = el('div');
+    kwHint.textContent = 'Comma-separated';
+    css(kwHint, { fontSize: '10px', color: '#9ca3af', marginBottom: '4px' });
+
+    const existingKw = document.querySelector('meta[name="keywords"]');
+    const kwInput = el('input');
+    kwInput.type = 'text';
+    kwInput.value = existingKw ? (existingKw.getAttribute('content') || '') : '';
+    kwInput.placeholder = 'osteopath, sports therapy, London';
+    css(kwInput, {
+      width: '100%',
+      boxSizing: 'border-box',
+      padding: '5px 8px',
+      border: '1px solid #d1d5db',
+      borderRadius: '4px',
+      fontSize: '12px',
+      fontFamily: 'inherit',
+    });
+    kwInput.addEventListener('input', () => {
+      upsertMetaTag('keywords', kwInput.value);
+      setDirty(true);
+    });
+
+    kwRow.append(kwLabel, kwHint, kwInput);
+
+    faviconSection.append(faviconTitle, faviconRow, faviconInput, titleRow, descRow, kwRow);
     content.appendChild(faviconSection);
     // ── end favicon section ──────────────────────────────────────────────────
 
