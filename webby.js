@@ -747,46 +747,84 @@ RULES:
   async function reformatNav(nav, description) {
     const prompt = buildReformatNavPrompt(nav, description);
     const responseText = await callGeminiAPI(prompt);
-    const html = parseHTMLFromResponse(responseText);
+    const { css, html } = parseNavResponse(responseText);
+
+    if (!html) throw new Error('AI did not return a valid <nav> element.');
     const tmp = document.createElement('div');
     tmp.innerHTML = html;
-    const newNav = tmp.firstElementChild;
-    if (!newNav || newNav.tagName.toLowerCase() !== 'nav') {
-      throw new Error('AI did not return a valid <nav> element.');
+    const newNav = tmp.querySelector('nav');
+    if (!newNav) throw new Error('AI did not return a valid <nav> element.');
+
+    // Upsert a dedicated nav style element so we never touch the main <style> block
+    let navStyleEl = document.getElementById('__webby-nav-styles');
+    if (!navStyleEl) {
+      navStyleEl = document.createElement('style');
+      navStyleEl.id = '__webby-nav-styles';
+      document.head.appendChild(navStyleEl);
     }
-    // Clear the bound marker so activateNav can rebind the new element
+    if (css) navStyleEl.textContent = css;
+
     delete newNav.dataset.webbyNavBound;
     nav.replaceWith(newNav);
+
+    // Re-apply toolbar offset to the new nav if it is fixed
+    if (getComputedStyle(newNav).position === 'fixed') {
+      const navTop = parseFloat(getComputedStyle(newNav).top) || 0;
+      if (navTop < 44) newNav.style.top = '44px';
+    }
+
     activateNav();
     setDirty(true);
+  }
+
+  function parseNavResponse(text) {
+    const cssMatch  = text.match(/<nav-css>([\s\S]*?)<\/nav-css>/);
+    const htmlMatch = text.match(/<nav-html>([\s\S]*?)<\/nav-html>/);
+    return {
+      css:  cssMatch  ? cssMatch[1].trim()  : '',
+      html: htmlMatch ? htmlMatch[1].trim() : text.trim(), // fallback: treat whole response as HTML
+    };
   }
 
   function buildReformatNavPrompt(nav, description) {
     const styleEl = document.querySelector('style');
     const styleBlock = styleEl ? styleEl.textContent : '';
 
+    // Include any existing nav-specific styles so AI can see what's already there
+    const existingNavStyles = document.getElementById('__webby-nav-styles');
+    const existingNavCSS = existingNavStyles ? existingNavStyles.textContent : '';
+
     const clone = nav.cloneNode(true);
     clone.querySelectorAll('[data-editor-ui]').forEach(el => el.remove());
     clone.removeAttribute('data-webby-nav-bound');
 
-    return `You are reformatting the navigation element of a website.
+    return `You are rewriting the navigation for a website — both its HTML structure and all its CSS.
 
-STYLE CONTEXT (CSS variables and base styles in use):
-<style>
+CSS VARIABLES IN USE (use these, never hardcode colours or sizes):
 ${styleBlock}
-</style>
 
-EXISTING NAV HTML (reformat this):
+${existingNavCSS ? `EXISTING NAV-SPECIFIC CSS (currently in a separate style block):\n${existingNavCSS}\n` : ''}
+EXISTING NAV HTML:
 ${clone.outerHTML}
 
 REFORMAT INSTRUCTION:
 "${description}"
 
 RULES:
-- Preserve ALL existing link text and hrefs exactly as-is unless the instruction explicitly says to change them
-- Only change HTML structure, CSS classes, layout, and responsive behaviour
-- Use only the CSS variables already defined in the style context — no hardcoded colours or sizes
-- Return ONLY the reformatted <nav> element — no explanation, no markdown fences, nothing else`;
+- Preserve ALL existing link text and hrefs exactly unless explicitly told to change them
+- You may change class names, structure, layout, JS toggle logic, and all CSS freely
+- Use only the CSS variables defined above — no hardcoded colours or font sizes
+- The mobile hamburger menu MUST: use position fixed or absolute so it is never clipped, have a solid background so page content is covered, have a high z-index (9000+), and close when a link is clicked or the window is resized to desktop width
+- Use a CSS class toggle driven by a small inline <script> at the bottom of the nav if JS is needed — keep it minimal and self-contained within the nav element
+- Return your response in EXACTLY this format with no other text:
+
+<nav-css>
+/* all CSS needed for the nav, including media queries */
+</nav-css>
+
+<nav-html>
+<nav>...</nav>
+</nav-html>`;
   }
 
   function injectAddSectionButtons() {
