@@ -26,9 +26,10 @@ Use the [Bootstrap Prompt](./BOOTSTRAP_PROMPT.md) with Claude.ai (attach 2–5 i
 ### 2. Create a GitHub repository and enable GitHub Pages
 
 1. Create a new **public** repository on GitHub (e.g. `jane/jane-osteopathy`)
-2. Go to **Settings → Pages**
-3. Under *Source*, select **Deploy from a branch**
-4. Set branch to `main`, folder to `/ (root)`, and click **Save**
+2. Make an initial commit to establish a `main` branch.
+3. Go to **Settings → Pages**
+4. Under *Source*, select **Deploy from a branch**
+5. Set branch to `main`, folder to `/ (root)`, and click **Save**
 
 That's it — GitHub Pages will serve files directly from the root of your `main` branch. Every time Webby pushes `index.html`, the live site updates automatically. No workflow files or GitHub Actions needed.
 
