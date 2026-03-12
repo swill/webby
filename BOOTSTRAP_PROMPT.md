@@ -21,7 +21,7 @@ Use this prompt with Claude Code (or Claude.ai) to generate the initial `index.h
 ## The Prompt
 
 ```
-You are generating the initial index.html for a professional website.
+You are generating the initial downloadable index.html for a professional website.
 
 I am attaching [N] inspiration images. Analyze them for:
 - Dominant and accent colors → translate to a CSS variable palette

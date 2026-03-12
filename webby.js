@@ -341,10 +341,16 @@
       node.contentEditable = 'true';
       node.setAttribute('spellcheck', 'true');
     });
-    section.querySelectorAll('[data-editable-image]').forEach(img => {
+    // Bind image handlers to ALL images in the zone — not just those with
+    // data-editable-image, so bootstrap-generated images are always editable.
+    section.querySelectorAll('img').forEach(img => {
+      if (img.closest('[data-editor-ui]')) return;
+      if (img.dataset.webbyBound) return; // already activated (e.g. re-injection)
+      img.dataset.webbyBound = '1';
       bindImageHandler(img);
     });
     injectDeleteButton(section);
+    injectReformatButton(section);
   }
 
   function deactivateZones() {
@@ -384,6 +390,16 @@
       btn.style.pointerEvents = 'none';
     });
 
+    // Highlight the section outline while hovering the delete button
+    btn.addEventListener('mouseenter', () => {
+      section.style.outline = '2px solid rgba(239,68,68,0.6)';
+      section.style.outlineOffset = '-2px';
+    });
+    btn.addEventListener('mouseleave', () => {
+      section.style.outline = '';
+      section.style.outlineOffset = '';
+    });
+
     btn.addEventListener('click', e => {
       e.stopPropagation();
       const label = section.dataset.zoneLabel || section.dataset.zone || 'this section';
@@ -400,6 +416,188 @@
       section.style.position = 'relative';
     }
     section.appendChild(btn);
+  }
+
+  function injectReformatButton(section) {
+    const btn = el('button', { 'data-editor-ui': '' });
+    btn.textContent = '⟳ Reformat';
+    css(btn, {
+      position: 'absolute',
+      top: '10px',
+      right: '130px',
+      zIndex: '1000',
+      padding: '4px 9px',
+      background: 'rgba(59,130,246,0.88)',
+      color: '#fff',
+      border: 'none',
+      borderRadius: '4px',
+      cursor: 'pointer',
+      fontSize: '11px',
+      opacity: '0',
+      transition: 'opacity 0.15s',
+      pointerEvents: 'none',
+    });
+
+    section.addEventListener('mouseenter', () => {
+      btn.style.opacity = '1';
+      btn.style.pointerEvents = 'auto';
+    });
+    section.addEventListener('mouseleave', () => {
+      btn.style.opacity = '0';
+      btn.style.pointerEvents = 'none';
+    });
+
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      promptReformatSection(section);
+    });
+
+    section.appendChild(btn);
+  }
+
+  function promptReformatSection(section) {
+    const label = section.dataset.zoneLabel || section.dataset.zone || 'Section';
+
+    const overlay = el('div', { 'data-editor-ui': '' });
+    css(overlay, {
+      position: 'fixed',
+      inset: '0',
+      background: 'rgba(0,0,0,0.55)',
+      zIndex: '1000000',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    });
+
+    const modal = el('div');
+    css(modal, {
+      background: '#fff',
+      borderRadius: '10px',
+      padding: '28px',
+      width: '500px',
+      maxWidth: '92vw',
+      fontFamily: 'system-ui, sans-serif',
+      boxShadow: '0 16px 48px rgba(0,0,0,0.25)',
+    });
+
+    modal.innerHTML = `
+      <h3 style="margin:0 0 6px;font-size:16px;color:#111;font-weight:700">Reformat: ${label}</h3>
+      <p style="margin:0 0 16px;font-size:13px;color:#666;line-height:1.5">
+        Describe how you want the layout or structure changed. Content (text, images) will not be changed unless you ask.
+      </p>
+      <textarea
+        id="__webby-reformat-desc"
+        placeholder="e.g. Show 4 columns on desktop but a single column on mobile instead of 2 columns"
+        style="width:100%;height:96px;padding:10px 12px;border:1px solid #ddd;border-radius:6px;
+               font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;
+               line-height:1.5;outline:none;transition:border-color 0.15s;"
+      ></textarea>
+      <p id="__webby-reformat-error" style="display:none;margin:8px 0 0;font-size:12px;color:#ef4444;"></p>
+      <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+        <button id="__webby-reformat-cancel"
+          style="padding:8px 16px;border:1px solid #ddd;background:#fff;border-radius:6px;
+                 cursor:pointer;font-size:13px;font-family:inherit;color:#444;">
+          Cancel
+        </button>
+        <button id="__webby-reformat-submit"
+          style="padding:8px 18px;background:#3b82f6;color:#fff;border:none;border-radius:6px;
+                 cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;transition:background 0.15s;">
+          Reformat with AI
+        </button>
+      </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const textarea = modal.querySelector('#__webby-reformat-desc');
+    const errorEl = modal.querySelector('#__webby-reformat-error');
+    const submitBtn = modal.querySelector('#__webby-reformat-submit');
+    const cancelBtn = modal.querySelector('#__webby-reformat-cancel');
+
+    textarea.focus();
+    textarea.addEventListener('focus', () => { textarea.style.borderColor = '#3b82f6'; });
+    textarea.addEventListener('blur', () => { textarea.style.borderColor = '#ddd'; });
+    submitBtn.addEventListener('mouseenter', () => { submitBtn.style.background = '#2563eb'; });
+    submitBtn.addEventListener('mouseleave', () => { submitBtn.style.background = '#3b82f6'; });
+
+    const close = () => overlay.remove();
+    cancelBtn.addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    textarea.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') submitBtn.click();
+    });
+
+    submitBtn.addEventListener('click', async () => {
+      const description = textarea.value.trim();
+      if (!description) { textarea.style.borderColor = '#ef4444'; return; }
+
+      errorEl.style.display = 'none';
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Reformatting…';
+      cancelBtn.disabled = true;
+
+      try {
+        await reformatSection(section, description);
+        overlay.remove();
+        showStatus('Section reformatted ✓');
+      } catch (err) {
+        errorEl.textContent = 'Error: ' + err.message;
+        errorEl.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Try Again';
+        cancelBtn.disabled = false;
+      }
+    });
+  }
+
+  async function reformatSection(section, description) {
+    const prompt = buildReformatPrompt(section, description);
+    const responseText = await callGeminiAPI(prompt);
+    const html = parseHTMLFromResponse(responseText);
+
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    const newSection = tmp.firstElementChild;
+    if (!newSection) throw new Error('AI returned no valid HTML element.');
+
+    section.replaceWith(newSection);
+    activateZone(newSection);
+    refreshAddButtons();
+    setDirty(true);
+  }
+
+  function buildReformatPrompt(section, description) {
+    const styleEl = document.querySelector('style');
+    const styleBlock = styleEl ? styleEl.textContent : '';
+
+    // Clean copy of the section — strip editor UI before sending to AI
+    const clone = section.cloneNode(true);
+    clone.querySelectorAll('[data-editor-ui]').forEach(el => el.remove());
+    clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+    clone.querySelectorAll('[spellcheck]').forEach(el => el.removeAttribute('spellcheck'));
+    clone.querySelectorAll('[data-webby-bound]').forEach(el => el.removeAttribute('data-webby-bound'));
+
+    return `You are reformatting an existing HTML section for a website.
+
+STYLE CONTEXT (CSS variables and base styles in use):
+<style>
+${styleBlock}
+</style>
+
+EXISTING SECTION HTML (reformat this):
+${clone.outerHTML}
+
+REFORMAT INSTRUCTION:
+"${description}"
+
+RULES:
+- Preserve ALL existing text content, images, and links exactly as-is unless the instruction explicitly says to change them
+- Only change HTML structure, CSS classes, layout, and responsive behaviour
+- Use only the CSS variables already defined in the style context — no hardcoded colours or sizes
+- Keep data-zone and data-zone-label attributes on the <section> element
+- Keep data-editable on all text elements and data-editable-image on all img elements
+- Return ONLY the reformatted <section> element — no explanation, no markdown fences, nothing else`;
   }
 
   function injectAddSectionButtons() {
@@ -800,6 +998,11 @@ RULES:
     clone.querySelectorAll('img[data-webby-src]').forEach(img => {
       img.setAttribute('src', img.dataset.webbySrc);
       img.removeAttribute('data-webby-src');
+    });
+
+    // Remove internal binding marker added by activateZone
+    clone.querySelectorAll('img[data-webby-bound]').forEach(img => {
+      img.removeAttribute('data-webby-bound');
     });
 
     // For publish/export only: strip secrets.js and webby.js so they never go live
