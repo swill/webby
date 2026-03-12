@@ -394,20 +394,18 @@
     btn.textContent = '#';
     css(btn, {
       position: 'absolute',
-      top: '50%',
-      left: '-32px',
+      top: '80px',
+      left: '10px',
       transform: 'translateY(-50%)',
       zIndex: '1000',
-      width: '24px',
-      height: '24px',
       padding: '0',
-      background: 'rgba(30,30,50,0.75)',
-      color: '#e8e8f0',
+      background: 'transparent',
+      color: 'rgb(185,185,185)',
       border: 'none',
-      borderRadius: '4px',
       cursor: 'pointer',
-      fontSize: '13px',
-      fontWeight: '700',
+      fontSize: '50px',
+      fontWeight: '300',
+      fontFamily: 'Georgia, "Times New Roman", serif',
       lineHeight: '24px',
       textAlign: 'center',
       opacity: '0',
@@ -436,15 +434,6 @@
     btn.appendChild(tip);
 
     section.addEventListener('mouseenter', () => {
-      // Position outside if there's room, otherwise tuck inside the section
-      const leftSpace = section.getBoundingClientRect().left;
-      if (leftSpace >= 40) {
-        btn.style.left = '-32px';
-        tip.style.left = '28px';
-      } else {
-        btn.style.left = '10px';
-        tip.style.left = '38px';
-      }
       btn.style.opacity = '1';
       btn.style.pointerEvents = 'auto';
     });
