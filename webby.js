@@ -1311,6 +1311,49 @@ RULES:
     }
   }
 
+  // ─── Favicon Helpers ──────────────────────────────────────────────────────
+
+  function convertImageToPng(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        canvas.toBlob(blob => {
+          if (blob) resolve(blob);
+          else reject(new Error('Failed to convert image to PNG'));
+        }, 'image/png');
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not load image')); };
+      img.src = url;
+    });
+  }
+
+  function upsertFaviconLinks(href) {
+    const head = document.head;
+
+    let iconLink = head.querySelector('link[rel="icon"]');
+    if (!iconLink) {
+      iconLink = document.createElement('link');
+      iconLink.rel = 'icon';
+      head.appendChild(iconLink);
+    }
+    iconLink.type = 'image/png';
+    iconLink.href = href;
+
+    let appleLink = head.querySelector('link[rel="apple-touch-icon"]');
+    if (!appleLink) {
+      appleLink = document.createElement('link');
+      appleLink.rel = 'apple-touch-icon';
+      head.appendChild(appleLink);
+    }
+    appleLink.href = href;
+  }
+
   // ─── Theme Editor ─────────────────────────────────────────────────────────
 
   function openThemeEditor() {
@@ -1367,6 +1410,142 @@ RULES:
     // Content
     const content = el('div');
     css(content, { padding: '12px 16px 24px' });
+
+    // ── Favicon section ──────────────────────────────────────────────────────
+    const faviconSection = el('div');
+    css(faviconSection, { marginBottom: '20px', paddingBottom: '20px', borderBottom: '1px solid #f3f4f6' });
+
+    const faviconTitle = el('div');
+    faviconTitle.textContent = 'Site Identity';
+    css(faviconTitle, {
+      fontWeight: '700',
+      textTransform: 'uppercase',
+      fontSize: '10px',
+      color: '#9ca3af',
+      letterSpacing: '0.08em',
+      marginBottom: '10px',
+    });
+
+    const faviconRow = el('div');
+    css(faviconRow, { display: 'flex', alignItems: 'center', gap: '12px' });
+
+    // Preview box
+    const faviconPreview = el('div');
+    css(faviconPreview, {
+      width: '48px',
+      height: '48px',
+      border: '1px solid #e5e7eb',
+      borderRadius: '6px',
+      background: '#f9fafb',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      cursor: 'pointer',
+      overflow: 'hidden',
+      flexShrink: '0',
+      position: 'relative',
+    });
+
+    // Populate preview from existing <link rel="icon">
+    const existingIcon = document.querySelector('link[rel="icon"]');
+    const faviconImg = el('img');
+    if (existingIcon && existingIcon.href) {
+      faviconImg.src = existingIcon.href;
+      css(faviconImg, { width: '100%', height: '100%', objectFit: 'contain' });
+      faviconPreview.appendChild(faviconImg);
+    } else {
+      faviconPreview.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>`;
+    }
+
+    // Hover overlay
+    const faviconHint = el('div');
+    faviconHint.textContent = 'Click to set';
+    css(faviconHint, {
+      position: 'absolute',
+      inset: '0',
+      background: 'rgba(0,0,0,0.45)',
+      color: '#fff',
+      fontSize: '9px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      textAlign: 'center',
+      opacity: '0',
+      transition: 'opacity 0.15s',
+      borderRadius: '5px',
+    });
+    faviconPreview.appendChild(faviconHint);
+    faviconPreview.addEventListener('mouseenter', () => { faviconHint.style.opacity = '1'; });
+    faviconPreview.addEventListener('mouseleave', () => { faviconHint.style.opacity = '0'; });
+
+    const faviconMeta = el('div');
+    css(faviconMeta, { flex: '1', minWidth: '0' });
+    const faviconLabel = el('div');
+    faviconLabel.textContent = 'Favicon';
+    css(faviconLabel, { fontWeight: '600', fontSize: '12px', color: '#374151', marginBottom: '2px' });
+    const faviconSub = el('div');
+    faviconSub.textContent = existingIcon ? 'favicon.png' : 'None set';
+    css(faviconSub, { fontSize: '10px', color: '#9ca3af' });
+    faviconMeta.append(faviconLabel, faviconSub);
+
+    // Hidden file input
+    const faviconInput = el('input');
+    faviconInput.type = 'file';
+    faviconInput.accept = 'image/*';
+    css(faviconInput, { display: 'none' });
+    faviconInput.setAttribute('data-editor-ui', '');
+
+    faviconPreview.addEventListener('click', () => faviconInput.click());
+
+    faviconInput.addEventListener('change', async () => {
+      const file = faviconInput.files[0];
+      if (!file) return;
+      faviconSub.textContent = 'Uploading…';
+      try {
+        const pngBlob = await convertImageToPng(file);
+        const arrayBuffer = await pngBlob.arrayBuffer();
+        const uint8 = new Uint8Array(arrayBuffer);
+        let binary = '';
+        uint8.forEach(b => { binary += String.fromCharCode(b); });
+        const base64 = btoa(binary);
+
+        await github.uploadFile('assets/favicon.png', base64);
+
+        if (dirHandle) {
+          const fileHandle = await dirHandle.getFileHandle('assets/favicon.png', { create: true })
+            .catch(async () => {
+              // assets/ subfolder may not exist yet
+              const assetsDir = await dirHandle.getDirectoryHandle('assets', { create: true });
+              return assetsDir.getFileHandle('favicon.png', { create: true });
+            });
+          const writable = await fileHandle.createWritable();
+          await writable.write(pngBlob);
+          await writable.close();
+        }
+
+        upsertFaviconLinks('./assets/favicon.png');
+
+        // Update preview
+        const blobUrl = URL.createObjectURL(pngBlob);
+        faviconPreview.innerHTML = '';
+        const newImg = el('img');
+        newImg.src = blobUrl;
+        css(newImg, { width: '100%', height: '100%', objectFit: 'contain' });
+        faviconPreview.append(newImg, faviconHint);
+        faviconSub.textContent = 'favicon.png';
+        setDirty(true);
+        showStatus('Favicon updated ✓');
+      } catch (err) {
+        faviconSub.textContent = 'Error — try again';
+        showStatus('Favicon error: ' + err.message, true);
+      }
+      faviconInput.value = '';
+    });
+
+    faviconRow.append(faviconPreview, faviconMeta);
+    faviconSection.append(faviconTitle, faviconRow, faviconInput);
+    content.appendChild(faviconSection);
+    // ── end favicon section ──────────────────────────────────────────────────
 
     const groups = groupVars(vars);
     for (const [groupName, groupVars] of Object.entries(groups)) {
