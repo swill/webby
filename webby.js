@@ -70,7 +70,7 @@
     exportBtn.addEventListener('click', exportToFile);
     publishBtn.addEventListener('click', publishSite);
 
-    bar.append(title, status, spacer, themeBtn, exportBtn, publishBtn);
+    bar.append(title, spacer, status, themeBtn, exportBtn, publishBtn);
     document.body.prepend(bar);
 
     // Push body content down so toolbar doesn't overlap
@@ -1257,6 +1257,9 @@ RULES:
         { method: 'PUT', headers: this.headers(), body: JSON.stringify(body) }
       );
       if (!res.ok) {
+        if (res.status === 409) {
+          throw new Error('__sha_conflict__');
+        }
         let msg = `GitHub ${res.status}`;
         try { msg = (await res.json()).message || msg; } catch (_) {}
         throw new Error(msg);
@@ -1305,7 +1308,13 @@ RULES:
       clearDraftCache();
       showStatus('Published ✓ — deploying…');
     } catch (err) {
-      showStatus('Publish failed: ' + err.message, true);
+      if (err.message === '__sha_conflict__') {
+        setDirty(false);
+        clearDraftCache();
+        showStatus('Already published ✓ — deploying…');
+      } else {
+        showStatus('Publish failed: ' + err.message, true);
+      }
     } finally {
       btns.forEach(b => { b.disabled = false; });
     }
