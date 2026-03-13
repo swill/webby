@@ -196,11 +196,14 @@
     });
   }
 
+  // Key handles per-site so different sites don't share the same stored folder
+  const HANDLE_KEY = 'dir:' + location.pathname;
+
   async function storeHandleInDB(handle) {
     const db = await openHandleDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction('handles', 'readwrite');
-      tx.objectStore('handles').put(handle, 'dir');
+      tx.objectStore('handles').put(handle, HANDLE_KEY);
       tx.oncomplete = resolve;
       tx.onerror = () => reject(tx.error);
     });
@@ -210,7 +213,7 @@
     const db = await openHandleDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction('handles', 'readonly');
-      const req = tx.objectStore('handles').get('dir');
+      const req = tx.objectStore('handles').get(HANDLE_KEY);
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => reject(req.error);
     });
