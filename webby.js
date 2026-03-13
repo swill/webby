@@ -598,7 +598,7 @@
       </p>
       <textarea
         id="__webby-reformat-desc"
-        placeholder="e.g. Show 4 columns on desktop but a single column on mobile instead of 2 columns"
+        placeholder="e.g. Remove the section title and add a third box to the right of the other two.  Add a centered button at the bottom of each box."
         style="width:100%;height:96px;padding:10px 12px;border:1px solid #ddd;border-radius:6px;
                font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;
                line-height:1.5;outline:none;transition:border-color 0.15s;"
