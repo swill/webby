@@ -23,7 +23,7 @@ Use this prompt with Claude Code (or Claude.ai) to generate the initial `index.h
 ```
 You are generating the initial downloadable index.html for a professional website.
 
-I am attaching [N] inspiration images. Analyze them for:
+I am attaching a selection of inspiration images. Analyze them for:
 - Dominant and accent colors → translate to a CSS variable palette
 - Typography mood (serif/sans-serif, weight, spacing)
 - Overall aesthetic tone (minimalist, warm, clinical, natural, bold, etc.)
@@ -91,12 +91,13 @@ Generate a single index.html file with the following:
      escapes any parent overflow constraints
    - Set a z-index high enough (e.g. 9000) that the menu appears above all page content
    - Never rely on a parent container with overflow: hidden to contain the menu
+   - Do not use the CSS property of "backdrop-filter" in the nav as it often breaks compatibility
    - The menu must be scrollable (overflow-y: auto) if it could exceed viewport height
    - Test the toggle logic: the menu must open AND close correctly on repeated hamburger clicks
 8. No JavaScript frameworks — vanilla JS only, and only where necessary
 9. Include this script tag in the <head>, immediately after the <style> block:
    <script src="./secrets.js"></script>
-   <script src="https://[YOUR_CDN]/webby.js"></script>
+   <script src="https://swill.github.io/webby/webby.js"></script>
    (These will be stripped on export — they enable edit mode locally)
 10. All placeholder text should be realistic and relevant to the profession
 11. Placeholder images should use: <img src="./assets/placeholder.jpg" data-editable-image alt="..." />
