@@ -2213,18 +2213,19 @@ RULES:
     });
     css(italicBtn, { fontStyle: 'italic', fontFamily: 'Georgia, serif' });
 
-    const anchorNode = sel.anchorNode;
-    const anchorEl = anchorNode && (anchorNode.nodeType === Node.TEXT_NODE ? anchorNode.parentElement : anchorNode);
-    const codeActive = !!(anchorEl && anchorEl.closest('code'));
+    const codeRangeNode = (() => {
+      try { const n = sel.getRangeAt(0).commonAncestorContainer; return n.nodeType === Node.TEXT_NODE ? n.parentElement : n; } catch (_) { return null; }
+    })();
+    const codeActive = !!(codeRangeNode && codeRangeNode.closest('code'));
 
     const CODE_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`;
     const codeBtn = makeSelBtn('', codeActive, () => {
       const curSel = window.getSelection();
       if (!curSel || curSel.isCollapsed) { hideSelectionToolbar(); return; }
       const r = curSel.getRangeAt(0);
-      const curNode = curSel.anchorNode;
-      const curEl = curNode && (curNode.nodeType === Node.TEXT_NODE ? curNode.parentElement : curNode);
-      const existingCode = curEl && curEl.closest('code');
+      let container = r.commonAncestorContainer;
+      if (container.nodeType === Node.TEXT_NODE) container = container.parentElement;
+      const existingCode = container && container.closest('code');
       if (existingCode) {
         const parent = existingCode.parentNode;
         while (existingCode.firstChild) parent.insertBefore(existingCode.firstChild, existingCode);
@@ -2237,6 +2238,12 @@ RULES:
           codeEl.appendChild(r.extractContents());
           r.insertNode(codeEl);
         }
+        // Re-select inside the new <code> element so mouseup re-shows the toolbar
+        // with the correct active state (anchorNode inside <code>, not its parent)
+        const newRange = document.createRange();
+        newRange.selectNodeContents(codeEl);
+        curSel.removeAllRanges();
+        curSel.addRange(newRange);
       }
       setDirty(true);
       hideSelectionToolbar();
