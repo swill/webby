@@ -2202,7 +2202,10 @@ RULES:
     const italicActive = document.queryCommandState('italic');
 
     const boldBtn = makeSelBtn('B', boldActive, () => {
+      const anchor = window.getSelection()?.anchorNode;
+      const strongContainer = anchor && (anchor.nodeType === Node.TEXT_NODE ? anchor.parentElement : anchor).closest('[data-editable]');
       document.execCommand('bold');
+      if (strongContainer) normalizeStrong(strongContainer);
       hideSelectionToolbar();
     });
     css(boldBtn, { fontWeight: '700', fontFamily: 'Georgia, serif' });
@@ -2329,18 +2332,31 @@ RULES:
   }
 
   function normalizeEm(container) {
-    // Convert any <i> tags to <em> for semantic consistency
     Array.from(container.querySelectorAll('i')).forEach(iEl => {
       const em = document.createElement('em');
       while (iEl.firstChild) em.appendChild(iEl.firstChild);
       iEl.replaceWith(em);
     });
-    // Merge directly adjacent <em> siblings
     Array.from(container.querySelectorAll('em')).forEach(em => {
       if (em.previousSibling && em.previousSibling.nodeName === 'EM') {
         const prev = em.previousSibling;
         while (em.firstChild) prev.appendChild(em.firstChild);
         em.remove();
+      }
+    });
+  }
+
+  function normalizeStrong(container) {
+    Array.from(container.querySelectorAll('b')).forEach(bEl => {
+      const strong = document.createElement('strong');
+      while (bEl.firstChild) strong.appendChild(bEl.firstChild);
+      bEl.replaceWith(strong);
+    });
+    Array.from(container.querySelectorAll('strong')).forEach(strong => {
+      if (strong.previousSibling && strong.previousSibling.nodeName === 'STRONG') {
+        const prev = strong.previousSibling;
+        while (strong.firstChild) prev.appendChild(strong.firstChild);
+        strong.remove();
       }
     });
   }
