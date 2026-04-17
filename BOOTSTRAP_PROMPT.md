@@ -99,6 +99,7 @@ Generate a single index.html file with the following:
    - Do not use the CSS property of "backdrop-filter" in the nav as it often breaks compatibility
    - The menu must be scrollable (overflow-y: auto) if it could exceed viewport height
    - Test the toggle logic: the menu must open AND close correctly on repeated hamburger clicks
+   - For the hamburger toggle script: bind events to the <nav> element using event delegation via document.currentScript, NOT to document or window. This allows the editor to re-run the script after nav changes without duplicate listeners. Pattern: (function(){ const nav=document.currentScript.closest('nav'); nav.addEventListener('click',function(e){ if(e.target.closest('.hamburger-class')) toggleNav(); }); })()
 8. No JavaScript frameworks — vanilla JS only, and only where necessary
 9. Include this script tag in the <head>, immediately after the <style> block:
    <script src="./secrets.js"></script>
@@ -208,6 +209,7 @@ Generate one HTML file per page, plus a webby-pages.json manifest. Requirements 
    - Do not use the CSS property of "backdrop-filter" in the nav
    - The menu must be scrollable (overflow-y: auto) if it could exceed viewport height
    - The menu must open AND close correctly on repeated hamburger clicks
+   - For the hamburger toggle script: bind events to the <nav> element using event delegation via document.currentScript, NOT to document or window. Pattern: (function(){ const nav=document.currentScript.closest('nav'); nav.addEventListener('click',function(e){ if(e.target.closest('.hamburger-class')) toggleNav(); }); })()
 8. No JavaScript frameworks — vanilla JS only, and only where necessary
 9. Include in the <head> of EVERY page, immediately after the <style> block:
    <script src="./secrets.js"></script>

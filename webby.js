@@ -969,6 +969,10 @@ RULES:
       if (navTop < 44) newNav.style.top = '44px';
     }
 
+    // Scripts inside dynamically-inserted HTML don't execute automatically.
+    // Re-run them now so hamburger toggle listeners are bound to the new nav elements.
+    rerunInlineScripts(newNav);
+
     activateNav();
 
     // Force immediate sync to other pages — don't rely on the auto-save timer
@@ -1020,7 +1024,8 @@ RULES:
 - Preserve ALL existing CSS classes, IDs, data attributes, and aria attributes unless directly involved in the change
 - Preserve ALL mobile responsive behaviour, hamburger menu functionality, and CSS media queries unless explicitly told to change them
 - If the instruction only involves adding, removing, or renaming links: modify ONLY those elements in the HTML — make no CSS changes and return no <nav-css> block
-- If CSS changes ARE required: use only the CSS variables defined above, keep the hamburger menu working (position fixed/absolute, solid background, z-index 9000+, closes on link click and desktop resize), use an inline <script> for any JS toggle logic
+- If CSS changes ARE required: use only the CSS variables defined above, keep the hamburger menu working (position fixed/absolute, solid background, z-index 9000+, closes on link click and desktop resize)
+- For any inline <script> toggle logic: bind events to the <nav> element (not document or window) using event delegation via currentScript, e.g.: (function(){ const n=document.currentScript.closest('nav'); n.addEventListener('click',function(e){ if(e.target.closest('.your-toggle-class')) toggle(); }); })(). This way listeners are cleaned up automatically when the nav is replaced and re-bound when the script re-runs.
 - Return your response in EXACTLY this format — include <nav-css> ONLY if CSS actually needs to change:
 
 <nav-html>
@@ -2879,6 +2884,19 @@ RULES:
   }
 
   // ─── DOM helpers ──────────────────────────────────────────────────────────
+
+  // Re-execute inline <script> elements within a container. Scripts parsed via
+  // innerHTML or replaceWith are inert — the browser does not run them. Replacing
+  // each <script> with a fresh element forces execution, rebinding any event listeners
+  // that were attached to elements now in the live DOM.
+  function rerunInlineScripts(el) {
+    el.querySelectorAll('script:not([src])').forEach(old => {
+      const fresh = document.createElement('script');
+      Array.from(old.attributes).forEach(a => fresh.setAttribute(a.name, a.value));
+      fresh.textContent = old.textContent;
+      old.replaceWith(fresh);
+    });
+  }
 
   function el(tag, attrs = {}) {
     const node = document.createElement(tag);
