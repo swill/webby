@@ -1718,6 +1718,8 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
     // Re-activate editing on restored content
     activateZones();
     activateNav();
+    const restoredNav = document.querySelector('nav');
+    if (restoredNav) rerunInlineScripts(restoredNav);
     bindMutationObserver();
 
     // Re-baseline nav sync so the next auto-save doesn't over-eagerly sync
