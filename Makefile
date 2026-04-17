@@ -50,10 +50,10 @@ endif
 	fi
 	@echo "Releasing v$(VERSION) (was v$(CURRENT_VERSION))..."
 	@# Stamp the header comment
-	@sed -i '' 's|^/\* webby\.js — v.*|/* webby.js — v$(VERSION)|' webby.js; \
-	 sed -i '' "s|^\( \* webby\.js — \)v[0-9][^ ]*|\1v$(VERSION)|" webby.js
+	@sed -i "s|^/\* webby\.js — v.*|/* webby.js — v$(VERSION)|" webby.js; \
+	 sed -i "s|^\( \* webby\.js — \)v[0-9][^ ]*|\1v$(VERSION)|" webby.js
 	@# Stamp the VERSION constant inside the IIFE
-	@sed -i '' "s|const VERSION = '[^']*'|const VERSION = '$(VERSION)'|" webby.js
+	@sed -i "s|const VERSION = '[^']*'|const VERSION = '$(VERSION)'|" webby.js
 	@# Write the VERSION file
 	@echo "$(VERSION)" > VERSION
 	@# Create the pinned versioned copy

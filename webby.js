@@ -1239,7 +1239,31 @@ RULES:
           background: 'rgba(59,130,246,0.08)',
           whiteSpace: 'nowrap',
         });
-        row.append(openBtn);
+
+        const delBtn = el('button');
+        delBtn.textContent = '✕';
+        delBtn.title = 'Delete page';
+        css(delBtn, {
+          flexShrink: '0',
+          padding: '3px 7px',
+          background: 'transparent',
+          border: '1px solid rgba(239,68,68,0.4)',
+          borderRadius: '4px',
+          color: '#ef4444',
+          cursor: 'pointer',
+          fontSize: '11px',
+          fontFamily: 'inherit',
+        });
+        delBtn.addEventListener('mouseenter', () => { delBtn.style.background = 'rgba(239,68,68,0.08)'; });
+        delBtn.addEventListener('mouseleave', () => { delBtn.style.background = 'transparent'; });
+        delBtn.addEventListener('click', async () => {
+          const label = page.navLabel || page.title || page.file;
+          if (!confirm(`Delete "${label}" (${page.file})?\n\nThis will remove the page and all nav links pointing to it. This cannot be undone.`)) return;
+          panel.remove();
+          await deletePageFromSite(page);
+        });
+
+        row.append(openBtn, delBtn);
       }
 
       list.appendChild(row);
@@ -1481,12 +1505,30 @@ RULES:
 
     const exampleZone = document.querySelector('[data-zone]');
     let exampleHTML = '';
+    let containerInstruction = '';
     if (exampleZone) {
       const clone = exampleZone.cloneNode(true);
       clone.querySelectorAll('[data-editor-ui]').forEach(n => n.remove());
       clone.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
       clone.querySelectorAll('[spellcheck]').forEach(n => n.removeAttribute('spellcheck'));
       exampleHTML = clone.outerHTML;
+
+      // Detect the container wrapper used inside sections so the AI replicates it exactly.
+      // We look for a direct child div whose class appears in a max-width or --container-width
+      // rule in the stylesheet — that's the layout container the site uses.
+      const directDivs = Array.from(exampleZone.children).filter(c => c.tagName === 'DIV');
+      const containerEl = directDivs.find(div => {
+        if (!div.className) return false;
+        // Check each class name against the style block for a max-width or container-width reference
+        return div.className.split(/\s+/).some(cls =>
+          styleBlock.includes('.' + cls) &&
+          (styleBlock.includes('max-width') || styleBlock.includes('container-width'))
+        );
+      }) || directDivs[0]; // fallback: first direct child div
+
+      if (containerEl && containerEl.className) {
+        containerInstruction = `\nCONTAINER WRAPPER: Every section's content must be wrapped in <div class="${containerEl.className}">...</div> — exactly as shown in the example section. Never render content edge-to-edge unless the example section explicitly does so.`;
+      }
     }
 
     const siteTitle = document.title || 'Website';
@@ -1513,7 +1555,7 @@ ${navHTML}
 
 EXAMPLE SECTION (match this markup style, class patterns, and data-* attributes exactly):
 ${exampleHTML}
-
+${containerInstruction}
 PAGE DESCRIPTION:
 "${description}"
 
@@ -1533,6 +1575,44 @@ REQUIREMENTS:
 11. Placeholder content should be realistic and relevant to the page description
 
 Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!DOCTYPE html>.`;
+  }
+
+  // Remove all nav links pointing to `filename` from a given nav element.
+  // Removes the closest <li> parent if present, otherwise the <a> itself.
+  function removePageFromNav(navEl, filename) {
+    if (!navEl) return;
+    const normalized = filename.replace(/^\.\//, '');
+    navEl.querySelectorAll('a[href]').forEach(a => {
+      const href = (a.getAttribute('href') || '').replace(/^\.\//, '').split('#')[0];
+      if (href === normalized) {
+        const li = a.closest('li');
+        if (li) li.remove();
+        else a.remove();
+      }
+    });
+  }
+
+  async function deletePageFromSite(page) {
+    const { file: filename, navLabel } = page;
+
+    // 1. Remove nav links pointing to this page from the current DOM
+    removePageFromNav(document.querySelector('nav'), filename);
+
+    // 2. Remove from inventory and save
+    pagesInventory.pages = pagesInventory.pages.filter(p => p.file !== filename);
+    await savePagesInventory();
+
+    // 3. Delete the local file (non-fatal if it fails or API unavailable)
+    if (dirHandle) {
+      try { await dirHandle.removeEntry(filename); } catch (_) {}
+    }
+
+    // 4. Force nav re-sync so the deleted page's link is removed from all remaining pages
+    lastSyncedNavHTML = '';
+    await syncNavToOtherPagesIfChanged();
+
+    setDirty(true);
+    showStatus(`Page "${navLabel}" deleted ✓`);
   }
 
   // ─── Mutation Observer ────────────────────────────────────────────────────

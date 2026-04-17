@@ -399,13 +399,16 @@ The base `<style>` block in `index.html` must define CSS custom properties so AI
 
 ## Browser Compatibility
 
-| Feature | Chrome | Edge | Safari | Firefox |
-|---|---|---|---|---|
-| Full edit mode | ✓ | ✓ | ✓ | ✓ |
-| Local file auto-save | ✓ | ✓ | ✓ | ✗ |
-| localStorage fallback | — | — | — | ✓ |
+Webby requires the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API) to read and write local files.
 
-Chrome or Edge recommended for the best experience. Firefox users must use **Export** to download the updated `index.html` and replace the local file manually.
+| Browser | Supported |
+|---|---|
+| Chrome 86+ | ✓ |
+| Edge 86+ | ✓ |
+| Safari 15.2+ | ✓ |
+| Firefox | ✗ |
+
+Opening a page in an unsupported browser shows a blocking message and prevents the editor from loading. Chrome or Edge are recommended for the most reliable experience.
 
 ---
 
