@@ -314,75 +314,84 @@
     showAccessBanner();
   }
 
+  // Blocking modal — the editor cannot save without a linked, writable folder,
+  // so the overlay covers the page and has no dismiss button. It only closes
+  // once showDirectoryPicker returns a handle with readwrite permission granted.
   function showAccessBanner() {
     if (document.getElementById('__webby-access-banner')) return;
 
-    const banner = el('div', { id: '__webby-access-banner', 'data-editor-ui': '' });
-    css(banner, {
+    const overlay = el('div', { id: '__webby-access-banner', 'data-editor-ui': '' });
+    css(overlay, {
       position: 'fixed',
-      top: '44px',
-      left: '0',
-      right: '0',
-      zIndex: '999997',
+      inset: '0',
+      zIndex: '9999999',
+      background: 'rgba(18,18,31,0.92)',
       display: 'flex',
       alignItems: 'center',
-      gap: '10px',
-      padding: '7px 16px',
-      background: '#1e3655',
-      color: '#cbd5e1',
+      justifyContent: 'center',
       fontFamily: 'system-ui, sans-serif',
-      fontSize: '12px',
-      boxShadow: '0 2px 6px rgba(0,0,0,0.25)',
+      padding: '20px',
       boxSizing: 'border-box',
     });
 
-    const btnStyle = 'padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-family:inherit;';
-
-    // Derive the folder path from the file:// URL for display as a hint
     const hintPath = location.protocol === 'file:'
       ? decodeURIComponent(location.pathname.substring(0, location.pathname.lastIndexOf('/')))
       : null;
     const hintHtml = hintPath
-      ? `<span style="font-family:monospace;font-size:11px;opacity:0.75;margin-left:4px;">(${hintPath})</span>`
+      ? `<div style="margin-top:14px;background:#f3f4f6;padding:8px 12px;border-radius:6px;font-family:monospace;font-size:12px;color:#374151;word-break:break-all;">${hintPath}</div>`
       : '';
 
-    banner.innerHTML = `
-      <span style="flex:1">💾 <strong>Link your site folder</strong> so edits save directly to your files — nothing gets lost on reload. ${hintHtml}</span>
-      <button id="__webby-banner-grant" style="${btnStyle}background:#3b82f6;border:none;color:#fff;font-weight:600;">Select Folder</button>
-      <button id="__webby-banner-dismiss" style="${btnStyle}background:transparent;border:1px solid rgba(255,255,255,0.25);color:#cbd5e1;">Not now</button>
-    `;
-
-    banner.querySelector('#__webby-banner-grant').addEventListener('click', async () => {
-      try {
-        // startIn: 'documents' is the best hint the API allows — we can't pass an
-        // exact path, so we show the path in the banner text instead.
-        const handle = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'documents' });
-        dirHandle = handle;
-        await storeHandleInDB(handle);
-        removeBanner();
-        await writeCurrentPageToLocalFile();
-        await loadPagesInventory();
-        lastSyncedNavHTML = getNavHTML(); // baseline so first auto-save doesn't spuriously sync
-        showStatus('Folder linked ✓ — edits now save to your files automatically');
-      } catch (e) {
-        if (e.name !== 'AbortError') showStatus('Could not access folder: ' + e.message, true);
-      }
+    const modal = el('div');
+    css(modal, {
+      background: '#fff',
+      borderRadius: '12px',
+      padding: '32px 36px',
+      maxWidth: '480px',
+      width: '100%',
+      textAlign: 'center',
+      boxShadow: '0 16px 48px rgba(0,0,0,0.35)',
+      boxSizing: 'border-box',
     });
 
-    banner.querySelector('#__webby-banner-dismiss').addEventListener('click', removeBanner);
-    document.body.insertBefore(banner, document.body.firstChild);
+    modal.innerHTML = `
+      <div style="font-size:36px;margin-bottom:14px;">💾</div>
+      <h2 style="margin:0 0 10px;font-size:18px;color:#111;">Folder access required</h2>
+      <p style="margin:0 0 8px;font-size:14px;color:#555;line-height:1.6;">
+        Webby needs write access to your site folder so edits save directly to your files.
+        Without this permission, the editor cannot save your changes.
+      </p>
+      ${hintHtml}
+      <button id="__webby-banner-grant"
+        style="margin-top:22px;background:#3b82f6;color:#fff;border:none;font-weight:600;padding:10px 22px;border-radius:6px;cursor:pointer;font-size:14px;font-family:inherit;">
+        Select Folder
+      </button>
+      <div id="__webby-banner-error" style="margin-top:12px;font-size:12px;color:#ef4444;min-height:16px;"></div>
+    `;
 
-    // Shift body down so the banner doesn't overlap content
-    const current = parseFloat(document.body.style.paddingTop) || 0;
-    document.body.style.paddingTop = (current + 36) + 'px';
-  }
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
 
-  function removeBanner() {
-    const banner = document.getElementById('__webby-access-banner');
-    if (!banner) return;
-    const current = parseFloat(document.body.style.paddingTop) || 0;
-    document.body.style.paddingTop = Math.max(0, current - 36) + 'px';
-    banner.remove();
+    const errEl = modal.querySelector('#__webby-banner-error');
+    modal.querySelector('#__webby-banner-grant').addEventListener('click', async () => {
+      errEl.textContent = '';
+      try {
+        const handle = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'documents' });
+        // Confirm the handle is actually writable before clearing the overlay
+        if (!(await verifyPermission(handle))) {
+          errEl.textContent = 'Write permission was not granted. Please try again.';
+          return;
+        }
+        dirHandle = handle;
+        await storeHandleInDB(handle);
+        overlay.remove();
+        await writeCurrentPageToLocalFile();
+        await loadPagesInventory();
+        lastSyncedNavHTML = getNavHTML();
+        showStatus('Folder linked ✓ — edits now save to your files automatically');
+      } catch (e) {
+        if (e.name !== 'AbortError') errEl.textContent = e.message || 'Could not access folder';
+      }
+    });
   }
 
   // ─── Pages Inventory ──────────────────────────────────────────────────────
@@ -2953,6 +2962,10 @@ RULES:
     const rect = range.getBoundingClientRect();
     if (!rect.width && !rect.height) return;
 
+    // Clone the range so we can restore it after the native color picker
+    // steals focus, or after the flyout is opened.
+    const savedRange = range.cloneRange();
+
     const bar = el('div', { id: '__webby-sel-toolbar', 'data-editor-ui': '' });
     css(bar, {
       position: 'fixed',
@@ -2961,9 +2974,21 @@ RULES:
       borderRadius: '6px',
       padding: '3px 5px',
       display: 'flex',
-      alignItems: 'center',
+      flexDirection: 'column',
+      alignItems: 'stretch',
       gap: '2px',
       boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+    });
+
+    const row = el('div');
+    css(row, { display: 'flex', alignItems: 'center', gap: '2px' });
+
+    const flyout = el('div', { 'data-editor-ui': '' });
+    css(flyout, {
+      display: 'none',
+      padding: '6px 4px 3px',
+      marginTop: '4px',
+      borderTop: '1px solid rgba(255,255,255,0.12)',
     });
 
     const boldActive   = document.queryCommandState('bold');
@@ -3047,7 +3072,23 @@ RULES:
     });
     linkBtn.innerHTML = LINK_SVG;
 
-    bar.append(boldBtn, italicBtn, codeBtn, linkBtn);
+    // Color button — opens a flyout with theme colors and a custom picker
+    const COLOR_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 5 12a7 7 0 1 0 14 0z"/></svg>`;
+    const colorBtn = makeSelBtn('', false, () => {
+      toggleFlyout(flyout, 'color', () => populateColorFlyout(flyout, savedRange));
+    });
+    colorBtn.innerHTML = COLOR_SVG;
+    colorBtn.title = 'Text color';
+
+    // Font button — opens a flyout with theme fonts
+    const fontBtn = makeSelBtn('Aa', false, () => {
+      toggleFlyout(flyout, 'font', () => populateFontFlyout(flyout, savedRange));
+    });
+    css(fontBtn, { fontFamily: 'Georgia, serif', fontWeight: '600', fontSize: '12px' });
+    fontBtn.title = 'Font family';
+
+    row.append(boldBtn, italicBtn, colorBtn, fontBtn, codeBtn, linkBtn);
+    bar.append(row, flyout);
     document.body.appendChild(bar);
     selectionToolbar = bar;
 
@@ -3058,6 +3099,180 @@ RULES:
     if (top < 8) top = rect.bottom + 8;
     left = Math.max(8, Math.min(window.innerWidth - bRect.width - 8, left));
     css(bar, { top: top + 'px', left: left + 'px' });
+  }
+
+  // ─── Selection toolbar: color / font flyouts ──────────────────────────────
+
+  function toggleFlyout(flyout, mode, populate) {
+    if (flyout.dataset.mode === mode && flyout.style.display !== 'none') {
+      flyout.style.display = 'none';
+      flyout.dataset.mode = '';
+      flyout.innerHTML = '';
+      repositionSelectionToolbar();
+      return;
+    }
+    flyout.innerHTML = '';
+    flyout.dataset.mode = mode;
+    flyout.style.display = 'block';
+    populate();
+    repositionSelectionToolbar();
+  }
+
+  function repositionSelectionToolbar() {
+    if (!selectionToolbar) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    if (!rect.width && !rect.height) return;
+    const bRect = selectionToolbar.getBoundingClientRect();
+    let top  = rect.top  - bRect.height - 8;
+    let left = rect.left + rect.width / 2 - bRect.width / 2;
+    if (top < 8) top = rect.bottom + 8;
+    left = Math.max(8, Math.min(window.innerWidth - bRect.width - 8, left));
+    css(selectionToolbar, { top: top + 'px', left: left + 'px' });
+  }
+
+  function getThemeVars(prefix) {
+    const styleEl = document.querySelector('style');
+    if (!styleEl) return [];
+    const vars = parseCSSVars(styleEl.textContent);
+    return Object.entries(vars).filter(([k]) => k.startsWith(prefix));
+  }
+
+  function restoreSavedRange(savedRange) {
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(savedRange);
+  }
+
+  // Wrap the current selection in a <span> with an inline style. Used for
+  // color and font-family applied from the selection toolbar flyouts.
+  function wrapSelectionInStyledSpan(property, value) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const r = sel.getRangeAt(0);
+    const anchor = sel.anchorNode;
+    const editable = anchor &&
+      (anchor.nodeType === Node.TEXT_NODE ? anchor.parentElement : anchor).closest('[data-editable]');
+    if (!editable) return;
+    const span = document.createElement('span');
+    span.style[property] = value;
+    try {
+      r.surroundContents(span);
+    } catch (_) {
+      // surroundContents throws when the range crosses element boundaries —
+      // extract + insert preserves the selection contents across the boundary.
+      span.appendChild(r.extractContents());
+      r.insertNode(span);
+    }
+    setDirty(true);
+  }
+
+  function populateColorFlyout(flyout, savedRange) {
+    const grid = el('div');
+    css(grid, { display: 'flex', flexWrap: 'wrap', gap: '5px', maxWidth: '220px' });
+
+    const colors = getThemeVars('--color');
+    if (!colors.length) {
+      const empty = el('div');
+      empty.textContent = 'No theme colors defined';
+      css(empty, { color: '#94a3b8', fontSize: '11px', padding: '2px 4px' });
+      flyout.appendChild(empty);
+      return;
+    }
+
+    colors.forEach(([varName, varValue]) => {
+      const swatch = el('button', { 'data-editor-ui': '', title: varName.replace(/^--/, '') });
+      css(swatch, {
+        width: '22px',
+        height: '22px',
+        padding: '0',
+        border: '1px solid rgba(255,255,255,0.25)',
+        borderRadius: '4px',
+        cursor: 'pointer',
+        background: varValue,
+      });
+      swatch.addEventListener('mousedown', e => {
+        e.preventDefault();
+        restoreSavedRange(savedRange);
+        wrapSelectionInStyledSpan('color', `var(${varName})`);
+        hideSelectionToolbar();
+      });
+      grid.appendChild(swatch);
+    });
+
+    // Custom color — native picker wrapped in a label so the click opens it
+    const customWrap = el('label', { 'data-editor-ui': '', title: 'Custom color' });
+    css(customWrap, {
+      width: '22px',
+      height: '22px',
+      border: '1px dashed rgba(255,255,255,0.4)',
+      borderRadius: '4px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      cursor: 'pointer',
+      position: 'relative',
+      overflow: 'hidden',
+    });
+    customWrap.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`;
+
+    const colorInput = el('input', { 'data-editor-ui': '' });
+    colorInput.type = 'color';
+    css(colorInput, {
+      position: 'absolute', inset: '0', opacity: '0', cursor: 'pointer', border: 'none', padding: '0',
+    });
+    colorInput.addEventListener('change', () => {
+      restoreSavedRange(savedRange);
+      wrapSelectionInStyledSpan('color', colorInput.value);
+      hideSelectionToolbar();
+    });
+    customWrap.appendChild(colorInput);
+    grid.appendChild(customWrap);
+
+    flyout.appendChild(grid);
+  }
+
+  function populateFontFlyout(flyout, savedRange) {
+    const list = el('div');
+    css(list, { display: 'flex', flexDirection: 'column', gap: '2px', maxWidth: '220px' });
+
+    const fonts = getThemeVars('--font').filter(([k]) => !k.includes('size') && !k.includes('line-height') && !k.includes('weight'));
+    if (!fonts.length) {
+      const empty = el('div');
+      empty.textContent = 'No theme fonts defined';
+      css(empty, { color: '#94a3b8', fontSize: '11px', padding: '2px 4px' });
+      flyout.appendChild(empty);
+      return;
+    }
+
+    fonts.forEach(([varName, varValue]) => {
+      const item = el('button', { 'data-editor-ui': '', title: varValue });
+      item.textContent = varName.replace(/^--font-?/, '') || 'font';
+      css(item, {
+        padding: '5px 8px',
+        background: 'transparent',
+        border: 'none',
+        borderRadius: '4px',
+        color: '#e8e8f0',
+        cursor: 'pointer',
+        fontSize: '13px',
+        fontFamily: varValue,
+        textAlign: 'left',
+        width: '100%',
+      });
+      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,0.1)'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+      item.addEventListener('mousedown', e => {
+        e.preventDefault();
+        restoreSavedRange(savedRange);
+        wrapSelectionInStyledSpan('fontFamily', `var(${varName})`);
+        hideSelectionToolbar();
+      });
+      list.appendChild(item);
+    });
+
+    flyout.appendChild(list);
   }
 
   function makeSelBtn(label, active, action) {
