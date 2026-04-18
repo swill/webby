@@ -2943,7 +2943,11 @@ RULES:
     });
   }
 
-  function onSelectionChange() {
+  function onSelectionChange(e) {
+    // Mouse/key events originating inside the toolbar itself (e.g. mouseup after
+    // clicking the color or font button) must not rebuild the toolbar — doing so
+    // would wipe any open flyout before the user can pick an option.
+    if (e && selectionToolbar && e.target && selectionToolbar.contains(e.target)) return;
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.toString().trim()) {
       hideSelectionToolbar();
