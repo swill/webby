@@ -491,6 +491,15 @@
     return (href || '').replace(/^\.\//, '').split('#')[0].split('?')[0];
   }
 
+  // Match an anchor href against a page filename, tolerating common home-link
+  // aliases ("./", "/", "", ".") that all resolve to index.html.
+  function hrefMatchesFilename(href, filename) {
+    const norm = normalizeHref(href);
+    if (norm === filename) return true;
+    if (filename === 'index.html' && (norm === '' || norm === '.' || norm === '/')) return true;
+    return false;
+  }
+
   // Common "current page" marker classes used by hand-written and AI-generated navs.
   const ACTIVE_CLASS_CANDIDATES = ['active', 'current', 'is-active', 'is-current', 'selected'];
 
@@ -500,7 +509,7 @@
   // avoids false positives on unrelated unique classes (e.g. `has-megamenu`).
   function extractActiveMarker(navEl, sourceFilename) {
     const sourceAnchors = Array.from(navEl.querySelectorAll('a[href]'))
-      .filter(a => normalizeHref(a.getAttribute('href')) === sourceFilename);
+      .filter(a => hrefMatchesFilename(a.getAttribute('href'), sourceFilename));
     if (!sourceAnchors.length) return null;
 
     const ref = sourceAnchors[0];
@@ -520,7 +529,7 @@
     });
     if (!marker) return;
     navEl.querySelectorAll('a[href]').forEach(a => {
-      if (normalizeHref(a.getAttribute('href')) !== destFilename) return;
+      if (!hrefMatchesFilename(a.getAttribute('href'), destFilename)) return;
       marker.classes.forEach(c => a.classList.add(c));
       if (marker.ariaCurrent) a.setAttribute('aria-current', marker.ariaCurrent);
     });
