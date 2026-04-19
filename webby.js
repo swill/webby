@@ -2524,6 +2524,11 @@ RULES:
     const navClone = clone.querySelector('nav[data-webby-nav-bound]');
     if (navClone) navClone.removeAttribute('data-webby-nav-bound');
 
+    // Strip any inline style attribute on <html> — never meaningful output.
+    // Older versions also wrote CSS vars here for live preview; cleaned up here
+    // so those stale overrides don't leak into the published / saved HTML.
+    clone.removeAttribute('style');
+
     // For publish/export only: strip secrets.js and webby.js so they never go live
     if (!local) {
       clone.querySelectorAll('script').forEach(s => {
@@ -3791,15 +3796,13 @@ RULES:
             }
 
             const varName = '--color-' + nameSuffix;
-            if (document.documentElement.style.getPropertyValue(varName) ||
-                styleEl.textContent.includes(varName + ':')) {
+            if (styleEl.textContent.includes(varName + ':')) {
               nameInput.style.borderColor = T.danger;
               nameInput.title = 'Variable already exists';
               return;
             }
 
             addStyleVar(styleEl, varName, value);
-            document.documentElement.style.setProperty(varName, value);
             setDirty(true);
 
             form.remove();
@@ -3865,8 +3868,10 @@ RULES:
           css(valueInput, { width: '100%', boxSizing: 'border-box', padding: '5px 8px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, fontSize: '11px', fontFamily: T.fontMono, marginBottom: '6px', background: '#fff', color: T.primary, outline: 'none' });
 
           // Row 3: "Browse fonts" button — opens the font previewer modal.
-          // Selection fills in the value + auto-suggests a variable name. The
-          // <link> is injected on commit (doAdd), not on preview click.
+          // Selection fills in the value only; the variable name is left for
+          // the user to choose (names should describe the role, e.g. "display"
+          // or "accent", not the current font — fonts change, names shouldn't).
+          // The <link> is injected on commit (doAdd), not on preview click.
           let pickedFont = null;
           const browseBtn = el('button');
           browseBtn.textContent = 'Browse Google Fonts…';
@@ -3885,9 +3890,6 @@ RULES:
             openFontPreviewer((font, value) => {
               pickedFont = font;
               valueInput.value = value;
-              if (!nameInput.value.trim()) {
-                nameInput.value = font.name.toLowerCase().replace(/ /g, '-');
-              }
             });
           });
           // If the user types a custom value, the picked-font link is no longer
@@ -3929,15 +3931,13 @@ RULES:
 
             const varName = '--font-' + nameSuffix;
             // Guard against duplicates
-            if (document.documentElement.style.getPropertyValue(varName) ||
-                styleEl.textContent.includes(varName + ':')) {
+            if (styleEl.textContent.includes(varName + ':')) {
               nameInput.style.borderColor = T.danger;
               nameInput.title = 'Variable already exists';
               return;
             }
 
             addStyleVar(styleEl, varName, value);
-            document.documentElement.style.setProperty(varName, value);
             if (pickedFont) ensureGoogleFontLink(pickedFont);
             setDirty(true);
 
@@ -3998,7 +3998,6 @@ RULES:
       css(hexInput, { width: '78px', padding: '5px 8px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, fontSize: '11px', fontFamily: T.fontMono, flexShrink: '0', background: '#fff', color: T.primary, outline: 'none' });
 
       const apply = val => {
-        document.documentElement.style.setProperty(varName, val);
         updateStyleVar(styleEl, varName, val);
         setDirty(true);
       };
@@ -4022,7 +4021,6 @@ RULES:
       css(input, { width: '116px', padding: '5px 8px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, fontSize: '11px', fontFamily: T.fontMono, background: '#fff', color: T.primary, outline: 'none' });
       const applyValue = val => {
         input.value = val;
-        document.documentElement.style.setProperty(varName, val);
         updateStyleVar(styleEl, varName, val);
         setDirty(true);
       };
@@ -5043,6 +5041,11 @@ RULES:
 
   async function init() {
     loadGoogleFontsManifest();
+    // Older versions wrote CSS vars as inline styles on <html> for live preview,
+    // which then shadowed :root updates from undo/redo, reformat, and sync —
+    // stripping any existing attribute lets the <style> :root block be the sole
+    // source of truth going forward.
+    document.documentElement.removeAttribute('style');
     injectToolbar();
     activateZones();
     activateNav();

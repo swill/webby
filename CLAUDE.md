@@ -530,7 +530,7 @@ openThemeEditor()  ← toggled by Theme toolbar button; mutually exclusive with 
         ├── "Add font variable" inline form (Typography group only):
         │     ├── --font-{name} + value inputs
         │     ├── makeGoogleFontPicker() below the value input
-        │     │     (pick fills value + auto-suggests name; <link> injected on Add, not on preview)
+        │     │     (pick fills value only — name is user-chosen so it describes the role, not the font; <link> injected on Add, not on preview)
         │     └── On Add: addStyleVar() + ensureGoogleFontLink(pickedFont)
         └── On input: document.documentElement.style.setProperty() + patch <style> textContent
               (main <style> mutations then propagate to every page via the shared sync)
