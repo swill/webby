@@ -2191,6 +2191,7 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
       transition: 'opacity 0.2s',
       whiteSpace: 'nowrap',
       zIndex: '10',
+      border:'1px solid white',
     });
     parent.appendChild(hint);
 
