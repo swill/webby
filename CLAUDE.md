@@ -295,6 +295,7 @@ Floating toolbar that appears above selected text inside any `[data-editable]` e
 | *I* | `execCommand('italic')` → normalizes `<i>` → `<em>` |
 | 🎨 | Color flyout — theme swatches + custom picker + "Remove color" |
 | Aa | Font flyout — theme font vars + "Clear font styling" |
+| A↕ | Font-size flyout — em-based presets (Smaller 0.75 / Small 0.875 / **Normal** / Large 1.25 / Larger 1.5 / Huge 2). Relative `em` units so a bump inside a heading stays heading-scaled and a bump in body stays body-scaled. "Normal" strips the font-size property instead of writing a redundant `font-size: 1em`. |
 | `</>` | Wrap/unwrap selection in `<code>` |
 | 🔗 | Wrap selection in `<a>` → open link popover |
 
@@ -309,9 +310,9 @@ hideSelectionToolbar()
   └── Called on mousedown outside toolbar, Escape key, or after button action
 ```
 
-**Inline-style spans (color / font / future font-size):**
+**Inline-style spans (color / font / font-size):**
 
-Every span created by the color + font flyouts is tagged `data-webby-style`.
+Every span created by the color, font, and font-size flyouts is tagged `data-webby-style`.
 `wrapSelectionInStyledSpan(prop, val)` calls
 `clearInlineStyleFromSelection(prop, { onlyIfFullyCovered: true })` first so
 repeated changes to the same property replace rather than nest — no more
@@ -324,8 +325,8 @@ Scope is any inline-styled `<span>`, webby-owned or hand-authored. The
 from a span if the selection covers ALL of that span's contents, so
 hand-authored markup that extends beyond the selection is never mutated
 (partial selections still nest — correct, since the outer style still applies
-to the unselected portion). Explicit "Remove color" / "Clear font" buttons
-drop the guard since the user is being explicit.
+to the unselected portion). Explicit "Remove color" / "Clear font" /
+"Normal" (font-size) buttons drop the guard since the user is being explicit.
 
 The `data-webby-style` marker is stripped in publish output
 (`serialize({local: false})`) but preserved in local saves + snapshots so it

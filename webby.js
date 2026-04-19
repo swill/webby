@@ -4341,7 +4341,14 @@ RULES:
     css(fontBtn, { fontFamily: T.fontHead, fontWeight: '600', fontSize: '12px' });
     fontBtn.title = 'Font family';
 
-    row.append(boldBtn, italicBtn, colorBtn, fontBtn, codeBtn, linkBtn);
+    // Font-size button — opens a flyout with relative size presets
+    const fontSizeBtn = makeSelBtn('A\u2195', false, () => {
+      toggleFlyout(flyout, 'fontSize', () => populateFontSizeFlyout(flyout, savedRange));
+    });
+    css(fontSizeBtn, { fontFamily: T.fontHead, fontWeight: '600', fontSize: '12px' });
+    fontSizeBtn.title = 'Font size';
+
+    row.append(boldBtn, italicBtn, colorBtn, fontBtn, fontSizeBtn, codeBtn, linkBtn);
     bar.append(row, flyout);
     document.body.appendChild(bar);
     selectionToolbar = bar;
@@ -4771,6 +4778,58 @@ RULES:
       hideSelectionToolbar();
     });
     list.appendChild(clearBtn);
+
+    flyout.appendChild(list);
+  }
+
+  // Relative presets in `em` so a bump inside a heading stays heading-scaled
+  // and a bump in body stays body-scaled — the size is always relative to the
+  // surrounding text. "Normal" has no value — it strips the font-size span
+  // instead of writing a redundant font-size:1em.
+  const FONT_SIZE_PRESETS = [
+    { label: 'Smaller', value: '0.75em',  preview: '0.85em' },
+    { label: 'Small',   value: '0.875em', preview: '0.92em' },
+    { label: 'Normal',  value: null,      preview: '1em'    },
+    { label: 'Large',   value: '1.25em',  preview: '1.12em' },
+    { label: 'Larger',  value: '1.5em',   preview: '1.24em' },
+    { label: 'Huge',    value: '2em',     preview: '1.4em'  },
+  ];
+
+  function populateFontSizeFlyout(flyout, savedRange) {
+    const list = el('div');
+    css(list, { display: 'flex', flexDirection: 'column', gap: '2px', maxWidth: '220px' });
+
+    FONT_SIZE_PRESETS.forEach(({ label, value, preview }) => {
+      const item = el('button', { 'data-editor-ui': '', title: value || 'Inherit surrounding size' });
+      item.textContent = label;
+      css(item, {
+        padding: '6px 10px',
+        background: 'transparent',
+        border: 'none',
+        borderRadius: '6px',
+        color: T.bg,
+        cursor: 'pointer',
+        fontSize: preview,
+        fontFamily: T.fontBody,
+        textAlign: 'left',
+        width: '100%',
+        transition: 'background 0.12s',
+        lineHeight: '1.25',
+      });
+      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(253, 251, 245, 0.1)'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+      item.addEventListener('mousedown', e => {
+        e.preventDefault();
+        restoreSavedRange(savedRange);
+        if (value) {
+          wrapSelectionInStyledSpan('fontSize', value);
+        } else {
+          clearInlineStyleFromSelection('fontSize');
+        }
+        hideSelectionToolbar();
+      });
+      list.appendChild(item);
+    });
 
     flyout.appendChild(list);
   }
