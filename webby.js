@@ -3356,6 +3356,134 @@ RULES:
         section.appendChild(makeVarRow(varName, varValue, styleEl));
       }
 
+      // "Add color variable" button — only on the Colors group.
+      // New --color-* vars are auto-picked up by the selection toolbar's text
+      // color flyout (getThemeVars('--color')) and distributed to every page
+      // by the shared-head sync (main <style> is synced site-wide).
+      if (groupName === 'Colors') {
+        const addColorBtn = el('button');
+        addColorBtn.textContent = '＋ Add color variable';
+        css(addColorBtn, {
+          marginTop: '8px',
+          padding: '7px 12px',
+          background: 'transparent',
+          border: `1.5px dashed ${T.border}`,
+          borderRadius: T.radiusSm,
+          fontSize: '11.5px',
+          color: T.textMuted,
+          cursor: 'pointer',
+          width: '100%',
+          textAlign: 'left',
+          fontFamily: T.fontBody,
+          fontWeight: '500',
+          transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+        });
+        addColorBtn.addEventListener('mouseenter', () => { addColorBtn.style.background = T.bgAlt; addColorBtn.style.borderColor = T.accent2; addColorBtn.style.color = T.primary; });
+        addColorBtn.addEventListener('mouseleave', () => { addColorBtn.style.background = 'transparent'; addColorBtn.style.borderColor = T.border; addColorBtn.style.color = T.textMuted; });
+
+        addColorBtn.addEventListener('click', () => {
+          addColorBtn.style.display = 'none';
+
+          const form = el('div');
+          css(form, { marginTop: '6px' });
+
+          // Row 1: prefix label + name input
+          const nameRow = el('div');
+          css(nameRow, { display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '5px' });
+
+          const prefix = el('span');
+          prefix.textContent = '--color-';
+          css(prefix, { fontSize: '11px', fontFamily: T.fontMono, color: T.textMuted, flexShrink: '0' });
+
+          const nameInput = el('input');
+          nameInput.type = 'text';
+          nameInput.placeholder = 'brand';
+          css(nameInput, { flex: '1', minWidth: '0', padding: '5px 8px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, fontSize: '11px', fontFamily: T.fontMono, background: '#fff', color: T.primary, outline: 'none' });
+
+          nameRow.append(prefix, nameInput);
+
+          // Row 2: native picker + hex input, kept in sync
+          const valueRow = el('div');
+          css(valueRow, { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' });
+
+          const colorPicker = el('input');
+          colorPicker.type = 'color';
+          colorPicker.value = '#6366f1';
+          css(colorPicker, { width: '30px', height: '28px', padding: '1px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, cursor: 'pointer', flexShrink: '0', background: '#fff' });
+
+          const hexInput = el('input');
+          hexInput.type = 'text';
+          hexInput.value = colorPicker.value;
+          hexInput.spellcheck = false;
+          css(hexInput, { flex: '1', minWidth: '0', padding: '5px 8px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, fontSize: '11px', fontFamily: T.fontMono, background: '#fff', color: T.primary, outline: 'none' });
+
+          colorPicker.addEventListener('input', () => { hexInput.value = colorPicker.value; });
+          hexInput.addEventListener('input', () => {
+            const v = hexInput.value.trim();
+            if (/^#[0-9a-f]{6}$/i.test(v)) colorPicker.value = v;
+          });
+
+          valueRow.append(colorPicker, hexInput);
+
+          // Row 3: action buttons
+          const btnRow = el('div');
+          css(btnRow, { display: 'flex', gap: '6px' });
+
+          const confirmBtn = el('button');
+          confirmBtn.textContent = 'Add';
+          css(confirmBtn, { padding: '5px 14px', background: T.accent, color: T.primary, border: '2px solid transparent', borderRadius: T.radiusPill, fontSize: '11.5px', fontWeight: '600', cursor: 'pointer', fontFamily: T.fontBody, boxShadow: T.shadowCta, transition: 'background 0.15s, transform 0.15s' });
+          confirmBtn.addEventListener('mouseenter', () => { confirmBtn.style.background = T.accent2; confirmBtn.style.transform = 'translateY(-1px)'; });
+          confirmBtn.addEventListener('mouseleave', () => { confirmBtn.style.background = T.accent; confirmBtn.style.transform = 'translateY(0)'; });
+
+          const cancelBtn = el('button');
+          cancelBtn.textContent = 'Cancel';
+          css(cancelBtn, { padding: '5px 14px', background: 'transparent', border: `1.5px solid ${T.border}`, borderRadius: T.radiusPill, fontSize: '11.5px', cursor: 'pointer', fontFamily: T.fontBody, fontWeight: '500', color: T.primary, transition: 'background 0.15s' });
+          cancelBtn.addEventListener('mouseenter', () => { cancelBtn.style.background = T.bgAlt; });
+          cancelBtn.addEventListener('mouseleave', () => { cancelBtn.style.background = 'transparent'; });
+
+          btnRow.append(confirmBtn, cancelBtn);
+          form.append(nameRow, valueRow, btnRow);
+          section.appendChild(form);
+          nameInput.focus();
+
+          cancelBtn.addEventListener('click', () => {
+            form.remove();
+            addColorBtn.style.display = '';
+          });
+
+          const doAdd = () => {
+            const nameSuffix = nameInput.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+            const value = hexInput.value.trim();
+            if (!nameSuffix || !/^#[0-9a-f]{6}$/i.test(value)) {
+              (nameSuffix ? hexInput : nameInput).focus();
+              return;
+            }
+
+            const varName = '--color-' + nameSuffix;
+            if (document.documentElement.style.getPropertyValue(varName) ||
+                styleEl.textContent.includes(varName + ':')) {
+              nameInput.style.borderColor = T.danger;
+              nameInput.title = 'Variable already exists';
+              return;
+            }
+
+            addStyleVar(styleEl, varName, value);
+            document.documentElement.style.setProperty(varName, value);
+            setDirty(true);
+
+            form.remove();
+            addColorBtn.style.display = '';
+            section.insertBefore(makeVarRow(varName, value, styleEl), addColorBtn);
+          };
+
+          confirmBtn.addEventListener('click', doAdd);
+          nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') hexInput.focus(); });
+          hexInput.addEventListener('keydown', e => { if (e.key === 'Enter') doAdd(); });
+        });
+
+        section.appendChild(addColorBtn);
+      }
+
       // "Add font variable" button — only on the Typography group
       if (groupName === 'Typography') {
         const addFontBtn = el('button');
