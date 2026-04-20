@@ -709,14 +709,19 @@
 
         // Replace <nav> — re-target the "current page" active marker so each
         // destination page marks its own link, not the link of the source page.
+        // Prefer the source's marker, but fall back to the destination's own
+        // existing marker if the source has none. This prevents the sync from
+        // wiping active markers off every page just because the source page's
+        // nav happens to be in a transient state without one.
         if (currentNavHTML) {
           const existingNav = doc.querySelector('nav');
           if (existingNav) {
+            const destMarker = activeMarker || extractActiveMarker(existingNav, page.file);
             const tmp = doc.createElement('div');
             tmp.innerHTML = currentNavHTML;
             const newNav = tmp.querySelector('nav');
             if (newNav) {
-              retargetActiveMarker(newNav, activeMarker, page.file);
+              retargetActiveMarker(newNav, destMarker, page.file);
               existingNav.replaceWith(newNav);
             }
           }
