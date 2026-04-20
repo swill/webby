@@ -1,9 +1,11 @@
 # Bootstrap Prompt — New Site Generator
 
-Use this prompt with Claude Code (or Claude.ai) to generate the initial HTML files for a new site. Fill in all `[BRACKETED]` sections before running.
+Use this prompt with Claude.ai (or Claude Code) to generate the initial HTML files for a new site. Fill in all `[BRACKETED]` sections before running.
+
+This is **Step 1** of the Get Key path. The guided walkthrough — including GitHub repo setup, tokens, and publishing — lives at [gitqi.com/get-key.html](https://gitqi.com/get-key.html) and in the [README](./README.md#-the-get-key-path).
 
 Two modes are supported:
-- **Single-page** — everything on one `index.html` (original behaviour)
+- **Single-page** — everything on one `index.html`
 - **Multi-page** — separate HTML file per page, shared nav and theme, plus a `gitqi-pages.json` manifest
 
 ---
@@ -105,9 +107,11 @@ Generate a single index.html file with the following:
    <script src="./secrets.js"></script>
    <script src="https://swill.github.io/gitqi/gitqi.js"></script>
    (These will be stripped on export — they enable edit mode locally)
-10. All placeholder text should be realistic and relevant to the profession
-11. Placeholder images should use: <img src="./assets/placeholder.jpg" data-editable-image alt="..." />
-12. The overall visual result should be polished, professional, and production-ready
+10. Set a descriptive <title> and <meta name="description"> in <head> (both are editable
+    later from the Theme panel)
+11. All placeholder text should be realistic and relevant to the profession
+12. Placeholder images should use: <img src="./assets/placeholder.jpg" data-editable-image alt="..." />
+13. The overall visual result should be polished, professional, and production-ready
 
 ---
 
