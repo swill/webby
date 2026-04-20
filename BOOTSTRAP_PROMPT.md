@@ -4,7 +4,7 @@ Use this prompt with Claude Code (or Claude.ai) to generate the initial HTML fil
 
 Two modes are supported:
 - **Single-page** — everything on one `index.html` (original behaviour)
-- **Multi-page** — separate HTML file per page, shared nav and theme, plus a `webby-pages.json` manifest
+- **Multi-page** — separate HTML file per page, shared nav and theme, plus a `gitqi-pages.json` manifest
 
 ---
 
@@ -19,7 +19,7 @@ Two modes are supported:
 2. Paste the appropriate prompt below into Claude Code or Claude.ai, attach your images, and fill in the variables.
 
 3. **Single-page:** output is one `index.html`.  
-   **Multi-page:** output is one HTML file per page plus `webby-pages.json`.
+   **Multi-page:** output is one HTML file per page plus `gitqi-pages.json`.
 
 ---
 
@@ -103,7 +103,7 @@ Generate a single index.html file with the following:
 8. No JavaScript frameworks — vanilla JS only, and only where necessary
 9. Include this script tag in the <head>, immediately after the <style> block:
    <script src="./secrets.js"></script>
-   <script src="https://swill.github.io/webby/webby.js"></script>
+   <script src="https://swill.github.io/gitqi/gitqi.js"></script>
    (These will be stripped on export — they enable edit mode locally)
 10. All placeholder text should be realistic and relevant to the profession
 11. Placeholder images should use: <img src="./assets/placeholder.jpg" data-editable-image alt="..." />
@@ -183,7 +183,7 @@ Adjust pages, filenames, and sections to match the actual site.]
 ---
 
 TECHNICAL REQUIREMENTS:
-Generate one HTML file per page, plus a webby-pages.json manifest. Requirements for each file:
+Generate one HTML file per page, plus a gitqi-pages.json manifest. Requirements for each file:
 
 1. DOCTYPE html5, semantic HTML, mobile-first responsive layout
 2. No external CSS frameworks — all styles inline in a <style> block
@@ -213,7 +213,7 @@ Generate one HTML file per page, plus a webby-pages.json manifest. Requirements 
 8. No JavaScript frameworks — vanilla JS only, and only where necessary
 9. Include in the <head> of EVERY page, immediately after the <style> block:
    <script src="./secrets.js"></script>
-   <script src="https://swill.github.io/webby/webby.js"></script>
+   <script src="https://swill.github.io/gitqi/gitqi.js"></script>
    (These will be stripped on export — they enable edit mode locally)
 10. Set a unique, descriptive <title> and <meta name="description"> for each page
 11. All placeholder text should be realistic and relevant to the profession
@@ -222,8 +222,8 @@ Generate one HTML file per page, plus a webby-pages.json manifest. Requirements 
 
 ---
 
-webby-pages.json FORMAT:
-Also output a webby-pages.json file with this exact structure:
+gitqi-pages.json FORMAT:
+Also output a gitqi-pages.json file with this exact structure:
 {
   "pages": [
     { "file": "index.html",    "title": "Home — [Business Name]",    "navLabel": "Home" },
@@ -247,7 +247,7 @@ Return each file separated by a marker in this exact format:
 <!DOCTYPE html>
 ...
 
-=== FILE: webby-pages.json ===
+=== FILE: gitqi-pages.json ===
 {
   "pages": [...]
 }
@@ -266,7 +266,7 @@ No explanation, no markdown fences around file contents, no preamble.
 ### Multi-page site
 
 1. Copy each `=== FILE: xxx ===` section into its own file in your site folder.
-   You'll have `index.html`, `about.html`, etc. and `webby-pages.json`.
+   You'll have `index.html`, `about.html`, etc. and `gitqi-pages.json`.
 
 ### Both
 

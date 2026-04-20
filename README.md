@@ -1,19 +1,19 @@
-# Webby
+# GitQi
 
 A zero-dependency, browser-based inline editing system for static websites.
 
 The site owner opens their HTML files locally, edits content in-place, and publishes directly to GitHub Pages — no terminal, no CMS, no backend required.
 
-Check it out at: [webby.swill.io](https://webby.swill.io)
+Check it out at: [gitqi.swill.io](https://gitqi.swill.io)
 
 ---
 
 ## How it works
 
-Webby has two modes:
+GitQi has two modes:
 
 - **Edit mode** — activated automatically when `secrets.js` is present alongside the HTML files. The editor toolbar, editable zones, and AI tools all activate.
-- **Public mode** — the deployed site. No editor code, no credentials, no overhead. `webby.js` and `secrets.js` are stripped from the published output.
+- **Public mode** — the deployed site. No editor code, no credentials, no overhead. `gitqi.js` and `secrets.js` are stripped from the published output.
 
 The content "database" is the HTML file itself. The site owner edits text by clicking and typing directly on the page, replaces images by clicking them, and uses the AI assistant to generate new sections or entire new pages — all without touching code.
 
@@ -35,7 +35,7 @@ Save the output HTML file(s) to a folder on your computer. Create an `assets/` s
 4. Under *Source*, select **Deploy from a branch**
 5. Set branch to `main`, folder to `/ (root)`, and click **Save**
 
-GitHub Pages will serve files directly from the root of your `main` branch. Every time Webby publishes, the live site updates automatically. No workflow files or GitHub Actions needed.
+GitHub Pages will serve files directly from the root of your `main` branch. Every time GitQi publishes, the live site updates automatically. No workflow files or GitHub Actions needed.
 
 ### 3. Add `secrets.js` to the same folder as your HTML files
 
@@ -50,11 +50,11 @@ window.SITE_SECRETS = {
 
 Get your free Gemini API key at [aistudio.google.com](https://aistudio.google.com) — no billing required.
 
-> **This file stays on your computer only.** Webby publishes by pushing files directly to GitHub via the API — `secrets.js` is never sent anywhere except directly to the GitHub and Google APIs.
+> **This file stays on your computer only.** GitQi publishes by pushing files directly to GitHub via the API — `secrets.js` is never sent anywhere except directly to the GitHub and Google APIs.
 
 ### 4. Open your HTML file in your browser
 
-> **Use Chrome or Edge.** These are the only browsers that fully support the File System Access API, which lets Webby save your edits directly back to your files on disk. Safari and Firefox are not supported.
+> **Use Chrome or Edge.** These are the only browsers that fully support the File System Access API, which lets GitQi save your edits directly back to your files on disk. Safari and Firefox are not supported.
 
 The editor activates automatically. You'll see a dark toolbar at the top of the page.
 
@@ -100,9 +100,9 @@ The **↩** and **↪** buttons in the toolbar undo and redo structural changes 
 
 ### 7. Publish
 
-Click **Publish** in the toolbar. Webby uses the GitHub API to push all pages and the `webby-pages.json` inventory directly to your repository — no git, no terminal. GitHub Pages serves the updated site within ~60 seconds.
+Click **Publish** in the toolbar. GitQi uses the GitHub API to push all pages and the `gitqi-pages.json` inventory directly to your repository — no git, no terminal. GitHub Pages serves the updated site within ~60 seconds.
 
-> **How it works:** Webby serializes each page (stripping all editor UI and credentials), then calls the GitHub Contents API to write the files. Images are committed to `assets/` in your repo. The `webby-pages.json` manifest is pushed alongside the HTML files.
+> **How it works:** GitQi serializes each page (stripping all editor UI and credentials), then calls the GitHub Contents API to write the files. Images are committed to `assets/` in your repo. The `gitqi-pages.json` manifest is pushed alongside the HTML files.
 
 ---
 
@@ -119,7 +119,7 @@ By default your site is served at `https://username.github.io/repo-name`. To use
 2. In your GitHub repo, go to **Settings → Pages → Custom domain**, enter `www.example.com`, and click **Save**. GitHub will create a `CNAME` file automatically.
 3. Check **Enforce HTTPS** once the certificate is provisioned (usually a few minutes).
 
-> **Important:** Webby publishes by overwriting HTML files only — it does not touch the `CNAME` file. Your custom domain stays configured across all publishes.
+> **Important:** GitQi publishes by overwriting HTML files only — it does not touch the `CNAME` file. Your custom domain stays configured across all publishes.
 
 ### Option B — Apex domain (no www) — A records
 
@@ -140,7 +140,7 @@ By default your site is served at `https://username.github.io/repo-name`. To use
 
 ## HTML data attributes
 
-Webby uses data attributes to identify editable regions. These must be present in the generated HTML.
+GitQi uses data attributes to identify editable regions. These must be present in the generated HTML.
 
 | Attribute | Applied to | Purpose |
 |---|---|---|
@@ -167,14 +167,14 @@ Two script tags must appear in `<head>` (after the `<style>` block) for edit mod
 
 ```html
 <script src="./secrets.js"></script>
-<script src="https://swill.github.io/webby/webby.js"></script>
+<script src="https://swill.github.io/gitqi/gitqi.js"></script>
 ```
 
 ---
 
 ## Multi-page sites
 
-Multi-page sites use a `webby-pages.json` manifest in the site folder alongside the HTML files:
+Multi-page sites use a `gitqi-pages.json` manifest in the site folder alongside the HTML files:
 
 ```json
 {
@@ -186,12 +186,12 @@ Multi-page sites use a `webby-pages.json` manifest in the site folder alongside 
 }
 ```
 
-Webby creates and maintains this file automatically. It is pushed to GitHub on every publish. If you add Webby to an existing single-page site, the manifest is created automatically the first time you link your folder.
+GitQi creates and maintains this file automatically. It is pushed to GitHub on every publish. If you add GitQi to an existing single-page site, the manifest is created automatically the first time you link your folder.
 
-**Shared head + nav sync** — on every auto-save, Webby compares the current page's shared elements against a snapshot from the last sync. If anything changed, the updated elements are written to every other page file on disk automatically.
+**Shared head + nav sync** — on every auto-save, GitQi compares the current page's shared elements against a snapshot from the last sync. If anything changed, the updated elements are written to every other page file on disk automatically.
 
 Synced site-wide:
-- `<nav>` (including nav-specific CSS in `<style id="__webby-nav-styles">`)
+- `<nav>` (including nav-specific CSS in `<style id="__gitqi-nav-styles">`)
 - Main `<style>` block (CSS variables + base styles edited via the Theme panel)
 - `<link rel="icon">` and `<link rel="apple-touch-icon">` (favicon)
 - Google Fonts `<link>`s (plus their preconnect links)
@@ -202,21 +202,21 @@ Left page-specific: `<title>`, `<meta name="description">`, `<meta name="keyword
 
 ---
 
-## Hosting webby.js
+## Hosting gitqi.js
 
-`webby.js` is served from its own GitHub Pages repo (this one) so that multiple sites can share a single hosted copy.
+`gitqi.js` is served from its own GitHub Pages repo (this one) so that multiple sites can share a single hosted copy.
 
 **Latest version** (always up to date):
 ```
-https://swill.github.io/webby/webby.js
+https://swill.github.io/gitqi/gitqi.js
 ```
 
 **Pinned version** (recommended for production — immune to breaking changes):
 ```
-https://swill.github.io/webby/webby-1.2.0.js
+https://swill.github.io/gitqi/gitqi-1.2.0.js
 ```
 
-Pinned versioned files are committed alongside `webby.js` on each release and are never modified after publishing.
+Pinned versioned files are committed alongside `gitqi.js` on each release and are never modified after publishing.
 
 > **One-time setup:** Go to **Settings → Pages → Source → Deploy from a branch**, set branch to `main`, folder to `/ (root)`, and save. After that, `make release` keeps the live files up to date automatically.
 
@@ -233,7 +233,7 @@ Versions follow [Semantic Versioning](https://semver.org/):
 The version is accessible at runtime:
 
 ```js
-console.log(window.Webby.version);
+console.log(window.GitQi.version);
 ```
 
 ---
@@ -258,7 +258,7 @@ See the [Makefile](./Makefile) for full details on what each target does.
 
 ### Google Fonts manifest
 
-Webby ships a full Google Fonts catalog (`google-fonts.json`, served alongside `webby.js`) so the font picker covers the entire library, not just a curated subset. The manifest is regenerated manually via `make fonts`. At runtime `webby.js` fetches it, caches it in `localStorage`, and falls back to a small built-in list if the fetch fails.
+GitQi ships a full Google Fonts catalog (`google-fonts.json`, served alongside `gitqi.js`) so the font picker covers the entire library, not just a curated subset. The manifest is regenerated manually via `make fonts`. At runtime `gitqi.js` fetches it, caches it in `localStorage`, and falls back to a small built-in list if the fetch fails.
 
 **One-time setup** — needed only if you want to regenerate the manifest yourself:
 
@@ -278,7 +278,7 @@ Webby ships a full Google Fonts catalog (`google-fonts.json`, served alongside `
    ```bash
    make fonts
    ```
-   This fetches the catalog from the Developer API, sorted by popularity, and writes `google-fonts.json` at the repo root — each entry is `{ name, cat, weights }`. Array order is the popularity ranking. Commit the file and it deploys alongside `webby.js` on the next release.
+   This fetches the catalog from the Developer API, sorted by popularity, and writes `google-fonts.json` at the repo root — each entry is `{ name, cat, weights }`. Array order is the popularity ranking. Commit the file and it deploys alongside `gitqi.js` on the next release.
 
 ---
 

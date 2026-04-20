@@ -1,4 +1,4 @@
-# Webby - Site Editor — Project Architecture
+# GitQi - Site Editor — Project Architecture
 
 ## Overview
 
@@ -18,13 +18,13 @@ The system has two distinct modes:
 my-site/
 ├── index.html          ← Main page; content + CSS vars + structure
 ├── about.html          ← Additional pages (multi-page sites)
-├── webby-pages.json    ← Page inventory, auto-managed by Webby
+├── gitqi-pages.json    ← Page inventory, auto-managed by GitQi
 ├── secrets.js          ← Never published. Sets window.SITE_SECRETS
 └── assets/
     └── *.jpg / *.png
 ```
 
-This folder is **not** a git repository. Webby publishes HTML files and uploads images directly to GitHub via the REST API. `secrets.js` never leaves the local machine.
+This folder is **not** a git repository. GitQi publishes HTML files and uploads images directly to GitHub via the REST API. `secrets.js` never leaves the local machine.
 
 ### Remote GitHub repository
 
@@ -32,16 +32,16 @@ This folder is **not** a git repository. Webby publishes HTML files and uploads 
 username/repo-name  (GitHub)
 ├── index.html
 ├── about.html
-├── webby-pages.json
+├── gitqi-pages.json
 └── assets/
     └── *.jpg / *.png
 ```
 
-GitHub Pages is configured to serve from the root of the `main` branch ("Deploy from branch → main → / (root)"). Any push — including Webby's API commits — updates the live site automatically. No GitHub Actions workflow is required.
+GitHub Pages is configured to serve from the root of the `main` branch ("Deploy from branch → main → / (root)"). Any push — including GitQi's API commits — updates the live site automatically. No GitHub Actions workflow is required.
 
 ---
 
-## The Editor Script (`webby.js`)
+## The Editor Script (`gitqi.js`)
 
 Hosted externally on GitHub Pages. Included in each HTML page only during local editing — stripped from the published output.
 
@@ -134,7 +134,7 @@ Fixed-position bar injected at the top of the page in edit mode. Marked `data-ed
 - **Pages** button → open/close Pages panel
 - **Theme** button → open/close CSS variable + site identity editor
 - **Export** button → download clean HTML for the current page
-- **Publish** button → commit all pages and webby-pages.json to GitHub
+- **Publish** button → commit all pages and gitqi-pages.json to GitHub
 
 **Functions:**
 
@@ -177,11 +177,11 @@ writeImageToLocalDir(file)
   └── Write to assets/ subdirectory in the linked folder
 ```
 
-The `local: true` flag on `serialize()` preserves the `secrets.js` and `webby.js` script tags so edit mode activates correctly on the next open. The default `local: false` strips them for the deployed site.
+The `local: true` flag on `serialize()` preserves the `secrets.js` and `gitqi.js` script tags so edit mode activates correctly on the next open. The default `local: false` strips them for the deployed site.
 
 ### 4. Pages Inventory
 
-Tracks all pages in a `webby-pages.json` manifest alongside the HTML files. Auto-created on first use; auto-upgraded for existing single-page sites.
+Tracks all pages in a `gitqi-pages.json` manifest alongside the HTML files. Auto-created on first use; auto-upgraded for existing single-page sites.
 
 ```js
 // Structure
@@ -190,12 +190,12 @@ Tracks all pages in a `webby-pages.json` manifest alongside the HTML files. Auto
 
 ```
 loadPagesInventory()
-  ├── Try to read webby-pages.json from dirHandle
+  ├── Try to read gitqi-pages.json from dirHandle
   ├── If found: parse + ensure CURRENT_FILENAME is registered
   └── If not found: seed from current page → savePagesInventory()
 
 savePagesInventory()
-  └── Write webby-pages.json to dirHandle
+  └── Write gitqi-pages.json to dirHandle
 ```
 
 ### 5. Shared Head + Nav Sync
@@ -207,7 +207,7 @@ Also triggered immediately (not via auto-save timer) after: Reformat Nav, Add Pa
 **Synced** (page-to-page, whole-site):
 - `<nav>`
 - Main `<style>` (CSS variables + base styles — whatever the theme editor writes to)
-- `<style id="__webby-nav-styles">` (nav-specific CSS)
+- `<style id="__gitqi-nav-styles">` (nav-specific CSS)
 - `<link rel="icon">` and `<link rel="apple-touch-icon">` (favicon)
 - Google Fonts `<link>`s matching `fonts.googleapis.com` or `fonts.gstatic.com` (including preconnects)
 
@@ -216,10 +216,10 @@ Also triggered immediately (not via auto-save timer) after: Reformat Nav, Add Pa
 
 ```
 getNavHTML()
-  └── Clone nav → strip [data-editor-ui] + data-webby-nav-bound → return outerHTML
+  └── Clone nav → strip [data-editor-ui] + data-gitqi-nav-bound → return outerHTML
 
 getMainStyleElement(root)
-  └── First <style> in head whose id isn't a __webby-* managed id
+  └── First <style> in head whose id isn't a __gitqi-* managed id
 
 getSharedHeadElements()
   └── { mainStyle, navStyle, favicon, appleIcon, googleFontLinks }
@@ -236,7 +236,7 @@ syncSharedToOtherPagesIfChanged()
         ├── Read page file from dirHandle → DOMParser
         ├── Replace <nav> → retargetActiveMarker(newNav, activeMarker, page.file)  ← per-page "current link" styling
         ├── Replace main <style> textContent (insert if missing)
-        ├── Upsert/remove <style id="__webby-nav-styles">
+        ├── Upsert/remove <style id="__gitqi-nav-styles">
         ├── syncLinkRelInDoc(doc, 'icon', …) + apple-touch-icon
         ├── syncGoogleFontLinksInDoc(doc, googleFontLinks)  ← clears old, inserts fresh copies before first <style>
         └── Write back
@@ -271,7 +271,7 @@ Handles image replacement without leaving the browser.
    - Read as ArrayBuffer → base64 encode
    - Upload to `assets/` in GitHub repo via API
    - **If folder is linked:** write file to local `assets/`; set `src` to `./assets/filename`
-   - **If no folder access:** display via blob URL locally; store `./assets/filename` in `data-webby-src`; serializer resolves on publish/export
+   - **If no folder access:** display via blob URL locally; store `./assets/filename` in `data-gitqi-src`; serializer resolves on publish/export
 
 ```
 bindImageHandler(img)
@@ -280,7 +280,7 @@ bindImageHandler(img)
 handleImageUpload(file, imgEl)
   ├── Read as ArrayBuffer → base64Encode → github.uploadFile(`assets/${file.name}`)
   ├── If dirHandle: writeImageToLocalDir(file) → imgEl.src = `./assets/${file.name}`
-  └── Else: imgEl.src = blobURL; imgEl.dataset.webbySrc = `./assets/${file.name}`
+  └── Else: imgEl.src = blobURL; imgEl.dataset.gitqiSrc = `./assets/${file.name}`
 ```
 
 ### 8. Selection Toolbar
@@ -312,7 +312,7 @@ hideSelectionToolbar()
 
 **Inline-style spans (color / font / font-size):**
 
-Every span created by the color, font, and font-size flyouts is tagged `data-webby-style`.
+Every span created by the color, font, and font-size flyouts is tagged `data-gitqi-style`.
 `wrapSelectionInStyledSpan(prop, val)` calls
 `clearInlineStyleFromSelection(prop, { onlyIfFullyCovered: true })` first so
 repeated changes to the same property replace rather than nest — no more
@@ -320,7 +320,7 @@ repeated changes to the same property replace rather than nest — no more
 dead references. Legacy nests authored before the marker existed collapse on
 re-apply for the same reason.
 
-Scope is any inline-styled `<span>`, webby-owned or hand-authored. The
+Scope is any inline-styled `<span>`, gitqi-owned or hand-authored. The
 **full-coverage guard** is what keeps this safe: a property is only stripped
 from a span if the selection covers ALL of that span's contents, so
 hand-authored markup that extends beyond the selection is never mutated
@@ -328,7 +328,7 @@ hand-authored markup that extends beyond the selection is never mutated
 to the unselected portion). Explicit "Remove color" / "Clear font" /
 "Normal" (font-size) buttons drop the guard since the user is being explicit.
 
-The `data-webby-style` marker is stripped in publish output
+The `data-gitqi-style` marker is stripped in publish output
 (`serialize({local: false})`) but preserved in local saves + snapshots so it
 survives re-opens and undo/redo.
 
@@ -368,7 +368,7 @@ reformatSection(section, description)
   ├── buildReformatPrompt() — sends: main style block + section-specific CSS + clean section HTML
   ├── callGeminiAPI(prompt)
   ├── parseSectionResponse() — expects <section-css>...</section-css> <section-html>...</section-html>
-  ├── Upsert <style id="__webby-section-{slug}-styles"> for the returned CSS
+  ├── Upsert <style id="__gitqi-section-{slug}-styles"> for the returned CSS
   └── section.replaceWith(newSection) → activateZone(newSection)
 ```
 
@@ -378,14 +378,14 @@ AI-powered navigation restructuring. Makes minimal targeted changes; syncs immed
 
 ```
 activateNav()
-  └── Injects ⟳ Reformat Nav hover button; marks nav with data-webby-nav-bound
+  └── Injects ⟳ Reformat Nav hover button; marks nav with data-gitqi-nav-bound
 
 promptReformatNav(nav) → snapshotForUndo() → reformatNav(nav, description)
   ├── buildReformatNavPrompt() — sends: style block + existing nav-specific CSS + nav HTML
   ├── callGeminiAPI(prompt)
   ├── parseNavResponse() — expects <nav-html>...</nav-html> + optional <nav-css>...</nav-css>
   │     (AI omits <nav-css> for content-only changes like adding/removing a link)
-  ├── Upsert <style id="__webby-nav-styles"> only if CSS was returned
+  ├── Upsert <style id="__gitqi-nav-styles"> only if CSS was returned
   ├── nav.replaceWith(newNav)
   ├── rerunInlineScripts(newNav)       ← rebinds hamburger toggle listeners on new elements
   ├── activateNav()
@@ -446,7 +446,7 @@ generateSection(description, insertAfterZone)
   ├── buildSectionPrompt() — sends: style block + example zone HTML
   ├── callGeminiAPI(prompt)
   ├── parseSectionResponse() — <section-css> + <section-html>
-  ├── Upsert <style id="__webby-section-{slug}-styles"> for CSS
+  ├── Upsert <style id="__gitqi-section-{slug}-styles"> for CSS
   └── injectNewSection(section, insertAfterZone) → activateZone(section)
 ```
 
@@ -462,12 +462,12 @@ Both modes:
   ├── Clone document.documentElement
   ├── Remove all [data-editor-ui] elements (toolbar, modals, add/delete/reformat buttons)
   ├── Remove contenteditable + spellcheck attributes
-  ├── Remove data-webby-bound and data-webby-nav-bound attributes
-  ├── Resolve img[data-webby-src]: replace blob URL src with stored relative path
+  ├── Remove data-gitqi-bound and data-gitqi-nav-bound attributes
+  ├── Resolve img[data-gitqi-src]: replace blob URL src with stored relative path
   └── Restore original body padding-top and nav top offset
 
 local: false only:
-  └── Remove <script src="./secrets.js"> and <script src="...webby.js"> tags
+  └── Remove <script src="./secrets.js"> and <script src="...gitqi.js"> tags
 
 exportToFile()
   └── serialize({ local: false }) → trigger download as current page filename
@@ -485,7 +485,7 @@ publishSite()
   ├── 2. All other pages (if dirHandle + pagesInventory):
   │     For each page: read from disk → DOMParser → strip editor scripts
   │         → github.putFile(page.file, stripped, sha)
-  └── 3. Inventory: github.putFile('webby-pages.json', JSON, sha)
+  └── 3. Inventory: github.putFile('gitqi-pages.json', JSON, sha)
 
 github.getFileSHA(path)
   └── GET /repos/{repo}/contents/{path}?ref={branch} → return .sha (null if 404)
@@ -512,8 +512,8 @@ snapshotForUndo()  ← called before: section delete, section reformat, nav refo
 captureSnapshot()
   ├── Clone body — strip [data-editor-ui], contenteditable, spellcheck, binding attrs
   ├── Capture main <style> textContent
-  ├── Capture all <style id="__webby-section-*"> elements
-  └── Capture <style id="__webby-nav-styles"> if present
+  ├── Capture all <style id="__gitqi-section-*"> elements
+  └── Capture <style id="__gitqi-nav-styles"> if present
 
 restoreSnapshot(snapshot)
   ├── Disconnect mutation observer
@@ -563,11 +563,11 @@ openThemeEditor()  ← toggled by Theme toolbar button; mutually exclusive with 
 
 ### 18. Google Fonts
 
-Full Google Fonts catalog, sorted by popularity. A small curated list is compiled into `webby.js` as a fallback; at runtime `loadGoogleFontsManifest()` fetches the complete catalog from `google-fonts.json` (sibling of `webby.js`, generated via `make fonts`) and replaces the in-memory `GOOGLE_FONTS`. Entries are shaped `{ name, cat, weights }`; array order is popularity rank.
+Full Google Fonts catalog, sorted by popularity. A small curated list is compiled into `gitqi.js` as a fallback; at runtime `loadGoogleFontsManifest()` fetches the complete catalog from `google-fonts.json` (sibling of `gitqi.js`, generated via `make fonts`) and replaces the in-memory `GOOGLE_FONTS`. Entries are shaped `{ name, cat, weights }`; array order is popularity rank.
 
 ```
 loadGoogleFontsManifest()   ← called at the top of init()
-  ├── Fast path: read cached manifest from localStorage (key 'webby:fonts-manifest:v1')
+  ├── Fast path: read cached manifest from localStorage (key 'gitqi:fonts-manifest:v1')
   │     install synchronously if present
   └── Background fetch: {SCRIPT_BASE_URL}google-fonts.json → installFontsManifest()
         → write to localStorage on success. Failures are silent; curated fallback remains.
@@ -581,7 +581,7 @@ ensureGoogleFontLink(font)
 openFontPreviewer(onPick)   ← modal, replaces the old inline picker
   ├── Header + close button
   ├── Sample text input (default "The quick brown fox…"; persisted in localStorage key
-  │       'webby:font-preview-sample'; live-updates only rows whose font has finished
+  │       'gitqi:font-preview-sample'; live-updates only rows whose font has finished
   │       loading — unloaded rows keep their "…" placeholder until ready)
   ├── Category pills: All / Sans Serif / Serif / Display / Handwriting / Monospace
   ├── Search box (filters by name) + sort toggle (Popularity / A–Z)
@@ -678,9 +678,9 @@ The base `<style>` block in each page must define CSS custom properties so AI-ge
 }
 ```
 
-Additional style blocks used by Webby at runtime:
-- `<style id="__webby-nav-styles">` — nav-specific CSS written by Reformat Nav
-- `<style id="__webby-section-{slug}-styles">` — per-section CSS written by section Reformat / Add Section
+Additional style blocks used by GitQi at runtime:
+- `<style id="__gitqi-nav-styles">` — nav-specific CSS written by Reformat Nav
+- `<style id="__gitqi-section-{slug}-styles">` — per-section CSS written by section Reformat / Add Section
 
 ---
 
@@ -695,7 +695,7 @@ Additional style blocks used by Webby at runtime:
 
 ## Browser Compatibility
 
-Webby requires the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API).
+GitQi requires the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API).
 
 | Browser | Supported |
 |---|---|

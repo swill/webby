@@ -1,5 +1,5 @@
 /**
- * webby.js — v1.2.0
+ * gitqi.js — v1.2.0
  * Zero-dependency browser-based site editor.
  * Activates only when window.SITE_SECRETS is present (local edit mode).
  * Stripped from exported/published HTML automatically.
@@ -11,8 +11,14 @@
 
   if (!window.SITE_SECRETS) return;
 
+  // Base URL of this script on disk / CDN — used to locate sibling assets like
+  // google-fonts.json. Captured here while document.currentScript is still valid
+  // (it becomes null after the synchronous IIFE returns).
+  const SCRIPT_SRC = (document.currentScript && document.currentScript.src) || '';
+  const SCRIPT_BASE_URL = SCRIPT_SRC.substring(0, SCRIPT_SRC.lastIndexOf('/') + 1);
+
   // ─── Theme ────────────────────────────────────────────────────────────────
-  // Mirrors the webby.swill.io site palette + typography so the editor UI
+  // Mirrors the gitqi.com site palette + typography so the editor UI
   // feels stylistically consistent with the marketing site. These values are
   // used only inside editor UI elements (toolbar, modals, panels) — they are
   // never injected into the user's <head>, so the shared-head sync is unaffected.
@@ -57,14 +63,14 @@
   let originalNavTop = null; // set when a fixed nav is shifted down for the toolbar
   let autoSaveTimer = null;
   let dirHandle = null; // FileSystemDirectoryHandle when folder access is granted
-  let pagesInventory = null; // { pages: [{ file, title, navLabel }] } — loaded from webby-pages.json
+  let pagesInventory = null; // { pages: [{ file, title, navLabel }] } — loaded from gitqi-pages.json
   let lastSyncedSharedSnapshot = ''; // JSON snapshot of shared head + nav after last sync; change detection for auto-save
 
   const UNDO_LIMIT = 20;
   let undoStack = [];
   let redoStack = [];
 
-  // Webby requires the File System Access API. Only Chromium-based browsers
+  // GitQi requires the File System Access API. Only Chromium-based browsers
   // (Chrome, Edge) are supported. Safari and Firefox are not supported.
   if (!('showDirectoryPicker' in window)) {
     const msg = document.createElement('div');
@@ -79,7 +85,7 @@
         <div style="font-size:36px;margin-bottom:14px;">🌐</div>
         <h2 style="margin:0 0 10px;font-size:22px;color:${T.primary};font-family:${T.fontHead};font-weight:600;letter-spacing:-0.02em;">Unsupported Browser</h2>
         <p style="margin:0;font-size:14px;color:${T.textMuted};line-height:1.6;">
-          Webby requires access to the local file system and works in
+          GitQi requires access to the local file system and works in
           <strong style="color:${T.primary}">Chrome</strong> and <strong style="color:${T.primary}">Edge</strong>.<br><br>
           Please open this page in Chrome or Edge to use the editor.
         </p>
@@ -100,7 +106,7 @@
 
   function injectToolbar() {
     const bar = el('div', {
-      id: '__webby-toolbar',
+      id: '__gitqi-toolbar',
       'data-editor-ui': '',
     });
 
@@ -139,7 +145,7 @@
       flexShrink: '0',
     });
 
-    const title = el('span', { id: '__webby-title' });
+    const title = el('span', { id: '__gitqi-title' });
     title.textContent = document.title || 'Site Editor';
     css(title, {
       fontFamily: T.fontHead,
@@ -149,7 +155,7 @@
       color: T.bg,
     });
 
-    const status = el('span', { id: '__webby-status' });
+    const status = el('span', { id: '__gitqi-status' });
     css(status, {
       fontSize: '11.5px',
       opacity: '0.7',
@@ -162,13 +168,13 @@
     css(spacer, { flex: '1' });
 
     const undoBtn = toolbarBtn('↩');
-    undoBtn.id = '__webby-undo-btn';
+    undoBtn.id = '__gitqi-undo-btn';
     undoBtn.title = 'Undo (Ctrl+Z)';
     undoBtn.disabled = true;
     undoBtn.style.opacity = '0.35';
 
     const redoBtn = toolbarBtn('↪');
-    redoBtn.id = '__webby-redo-btn';
+    redoBtn.id = '__gitqi-redo-btn';
     redoBtn.title = 'Redo (Ctrl+Shift+Z)';
     redoBtn.disabled = true;
     redoBtn.style.opacity = '0.35';
@@ -243,7 +249,7 @@
   }
 
   function showStatus(msg, isError = false) {
-    const statusEl = document.getElementById('__webby-status');
+    const statusEl = document.getElementById('__gitqi-status');
     if (!statusEl) return;
     statusEl.textContent = msg;
     statusEl.style.color = isError ? T.accent4 : T.accent3;
@@ -259,7 +265,7 @@
 
   function setDirty(val) {
     isDirty = val;
-    const titleEl = document.getElementById('__webby-title');
+    const titleEl = document.getElementById('__gitqi-title');
     if (titleEl) titleEl.textContent = (val ? '● ' : '') + (document.title || 'Site Editor');
     if (val) scheduleAutoSave();
   }
@@ -331,7 +337,7 @@
 
   function openHandleDB() {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open('__webby_fs', 1);
+      const req = indexedDB.open('__gitqi_fs', 1);
       req.onupgradeneeded = e => e.target.result.createObjectStore('handles');
       req.onsuccess = e => resolve(e.target.result);
       req.onerror = () => reject(req.error);
@@ -362,20 +368,57 @@
     // Migration: v1.0.x stored the handle under the page pathname, not the site directory.
     // Try that old key format and re-store under the new key if found.
     const oldKey = 'dir:' + location.pathname;
-    if (oldKey === HANDLE_KEY) return null; // same key — nothing to migrate
-    const legacyHandle = await new Promise(resolve => {
+    if (oldKey !== HANDLE_KEY) {
+      const legacyHandle = await new Promise(resolve => {
+        try {
+          const tx = db.transaction('handles', 'readonly');
+          const req = tx.objectStore('handles').get(oldKey);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => resolve(null);
+        } catch (_) { resolve(null); }
+      });
+      if (legacyHandle) {
+        await storeHandleInDB(legacyHandle);
+        return legacyHandle;
+      }
+    }
+
+    // Legacy Webby migration: v1.2.x and earlier used the IndexedDB database
+    // name "__webby_fs". If the new "__gitqi_fs" database is empty, copy the
+    // handle over from the legacy DB and delete the legacy DB so future loads
+    // are clean. Runs only when the new DB has no handle — idempotent after
+    // the first successful migration.
+    const migratedHandle = await new Promise(resolve => {
       try {
-        const tx = db.transaction('handles', 'readonly');
-        const req = tx.objectStore('handles').get(oldKey);
-        req.onsuccess = () => resolve(req.result || null);
-        req.onerror = () => resolve(null);
+        const legacyReq = indexedDB.open('__webby_fs', 1);
+        legacyReq.onupgradeneeded = e => {
+          // Legacy DB didn't exist — abort (newly created empty DB will be
+          // cleaned up in onsuccess).
+          e.target.result.createObjectStore('handles');
+        };
+        legacyReq.onsuccess = e => {
+          const legacyDb = e.target.result;
+          let done = false;
+          const finish = val => { if (!done) { done = true; legacyDb.close(); resolve(val); } };
+          try {
+            const tx = legacyDb.transaction('handles', 'readonly');
+            const req = tx.objectStore('handles').get(HANDLE_KEY);
+            req.onsuccess = () => finish(req.result || null);
+            req.onerror = () => finish(null);
+          } catch (_) { finish(null); }
+        };
+        legacyReq.onerror = () => resolve(null);
       } catch (_) { resolve(null); }
     });
-    if (legacyHandle) {
-      // Re-store under the new key so future loads use the correct key
-      await storeHandleInDB(legacyHandle);
+    if (migratedHandle) {
+      await storeHandleInDB(migratedHandle);
+      try { indexedDB.deleteDatabase('__webby_fs'); } catch (_) {}
+      return migratedHandle;
     }
-    return legacyHandle;
+    // No legacy handle found — still delete the empty legacy DB we may have
+    // just created by opening it.
+    try { indexedDB.deleteDatabase('__webby_fs'); } catch (_) {}
+    return null;
   }
 
   async function verifyPermission(handle) {
@@ -403,9 +446,9 @@
   // so the overlay covers the page and has no dismiss button. It only closes
   // once showDirectoryPicker returns a handle with readwrite permission granted.
   function showAccessBanner() {
-    if (document.getElementById('__webby-access-banner')) return;
+    if (document.getElementById('__gitqi-access-banner')) return;
 
-    const overlay = el('div', { id: '__webby-access-banner', 'data-editor-ui': '' });
+    const overlay = el('div', { id: '__gitqi-access-banner', 'data-editor-ui': '' });
     css(overlay, {
       position: 'fixed',
       inset: '0',
@@ -446,25 +489,25 @@
       <div style="font-size:38px;margin-bottom:14px;">💾</div>
       <h2 style="margin:0 0 10px;font-size:22px;color:${T.primary};font-family:${T.fontHead};font-weight:600;letter-spacing:-0.02em;line-height:1.15;">Folder access required</h2>
       <p style="margin:0;font-size:14px;color:${T.textMuted};line-height:1.6;">
-        Webby needs write access to your site folder so edits save directly to your files.
+        GitQi needs write access to your site folder so edits save directly to your files.
         Without this permission, the editor cannot save your changes.
       </p>
       ${hintHtml}
-      <button id="__webby-banner-grant"
+      <button id="__gitqi-banner-grant"
         style="margin-top:22px;background:${T.accent};color:${T.primary};border:2px solid transparent;font-weight:600;padding:11px 26px;border-radius:${T.radiusPill};cursor:pointer;font-size:14px;font-family:${T.fontBody};box-shadow:${T.shadowCta};letter-spacing:-0.005em;transition:transform 0.2s ease, background 0.2s ease;">
         Select Folder
       </button>
-      <div id="__webby-banner-error" style="margin-top:14px;font-size:12.5px;color:${T.danger};min-height:16px;"></div>
+      <div id="__gitqi-banner-error" style="margin-top:14px;font-size:12.5px;color:${T.danger};min-height:16px;"></div>
     `;
-    const grantBtn = modal.querySelector('#__webby-banner-grant');
+    const grantBtn = modal.querySelector('#__gitqi-banner-grant');
     grantBtn.addEventListener('mouseenter', () => { grantBtn.style.background = T.accent2; grantBtn.style.transform = 'translateY(-2px)'; });
     grantBtn.addEventListener('mouseleave', () => { grantBtn.style.background = T.accent; grantBtn.style.transform = 'translateY(0)'; });
 
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    const errEl = modal.querySelector('#__webby-banner-error');
-    modal.querySelector('#__webby-banner-grant').addEventListener('click', async () => {
+    const errEl = modal.querySelector('#__gitqi-banner-error');
+    modal.querySelector('#__gitqi-banner-grant').addEventListener('click', async () => {
       errEl.textContent = '';
       try {
         const handle = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'documents' });
@@ -488,7 +531,7 @@
 
   // ─── Pages Inventory ──────────────────────────────────────────────────────
   //
-  // webby-pages.json tracks all pages managed by the editor.
+  // gitqi-pages.json tracks all pages managed by the editor.
   // It lives alongside the HTML files in the site folder and is pushed to GitHub on publish.
   // Structure: { "pages": [{ "file": "index.html", "title": "Home", "navLabel": "Home" }] }
 
@@ -499,7 +542,7 @@
       return;
     }
     try {
-      const fh = await dirHandle.getFileHandle('webby-pages.json');
+      const fh = await dirHandle.getFileHandle('gitqi-pages.json');
       const inventoryFile = await fh.getFile();
       pagesInventory = JSON.parse(await inventoryFile.text());
       // Ensure the current page is registered
@@ -507,8 +550,26 @@
         pagesInventory.pages.push({ file: CURRENT_FILENAME, title: document.title || CURRENT_FILENAME, navLabel: document.title || CURRENT_FILENAME });
         await savePagesInventory();
       }
+      return;
     } catch (_) {
-      // File doesn't exist yet — seed from the current page and write it
+      // fall through to legacy migration / seed
+    }
+
+    // Legacy Webby migration: if webby-pages.json exists but gitqi-pages.json
+    // doesn't, read the old file, write it as gitqi-pages.json, then delete
+    // the old one. Idempotent — only runs when gitqi-pages.json is absent.
+    try {
+      const legacyFh = await dirHandle.getFileHandle('webby-pages.json');
+      const legacyFile = await legacyFh.getFile();
+      pagesInventory = JSON.parse(await legacyFile.text());
+      if (!pagesInventory.pages.find(p => p.file === CURRENT_FILENAME)) {
+        pagesInventory.pages.push({ file: CURRENT_FILENAME, title: document.title || CURRENT_FILENAME, navLabel: document.title || CURRENT_FILENAME });
+      }
+      await savePagesInventory();
+      try { await dirHandle.removeEntry('webby-pages.json'); } catch (_) {}
+      return;
+    } catch (_) {
+      // No legacy file either — seed from the current page and write it
       pagesInventory = { pages: [{ file: CURRENT_FILENAME, title: document.title || CURRENT_FILENAME, navLabel: document.title || CURRENT_FILENAME }] };
       await savePagesInventory();
     }
@@ -517,7 +578,7 @@
   async function savePagesInventory() {
     if (!dirHandle || !pagesInventory) return;
     try {
-      const fh = await dirHandle.getFileHandle('webby-pages.json', { create: true });
+      const fh = await dirHandle.getFileHandle('gitqi-pages.json', { create: true });
       const writable = await fh.createWritable();
       await writable.write(JSON.stringify(pagesInventory, null, 2));
       await writable.close();
@@ -531,7 +592,7 @@
   // we push the updated shared elements into every other local page file.
   //
   // Synced: <nav>, main <style> (CSS variables + base styles),
-  //   <style id="__webby-nav-styles">, <link rel="icon">,
+  //   <style id="__gitqi-nav-styles">, <link rel="icon">,
   //   <link rel="apple-touch-icon">, Google Fonts <link>s and their preconnects.
   // NOT synced: <title>, <meta name="description">, <meta name="keywords"> —
   //   these are intentionally page-specific.
@@ -541,23 +602,23 @@
     if (!nav) return '';
     const clone = nav.cloneNode(true);
     clone.querySelectorAll('[data-editor-ui]').forEach(n => n.remove());
-    clone.removeAttribute('data-webby-nav-bound');
+    clone.removeAttribute('data-gitqi-nav-bound');
     return clone.outerHTML;
   }
 
-  // The main <style> block is the first <style> that isn't one of Webby's
+  // The main <style> block is the first <style> that isn't one of GitQi's
   // managed blocks (nav or per-section). Matches what the theme editor uses.
   function getMainStyleElement(root) {
     const head = root.head || root;
     const styles = Array.from(head.querySelectorAll('style'));
-    return styles.find(s => !s.id || !s.id.startsWith('__webby-')) || null;
+    return styles.find(s => !s.id || !s.id.startsWith('__gitqi-')) || null;
   }
 
   function getSharedHeadElements() {
     const head = document.head;
     return {
       mainStyle: getMainStyleElement(document),
-      navStyle:  head.querySelector('style#__webby-nav-styles'),
+      navStyle:  head.querySelector('style#__gitqi-nav-styles'),
       favicon:   head.querySelector('link[rel="icon"]'),
       appleIcon: head.querySelector('link[rel="apple-touch-icon"]'),
       googleFontLinks: Array.from(head.querySelectorAll(
@@ -644,6 +705,7 @@
         const pageFile = await fh.getFile();
         const text = await pageFile.text();
         const doc = new DOMParser().parseFromString(text, 'text/html');
+        migrateLegacyWebbyMarkersInDoc(doc);
 
         // Replace <nav> — re-target the "current page" active marker so each
         // destination page marks its own link, not the link of the source page.
@@ -673,13 +735,13 @@
         }
 
         // Replace nav style block (or remove if source no longer has one)
-        const destNavStyle = doc.head.querySelector('style#__webby-nav-styles');
+        const destNavStyle = doc.head.querySelector('style#__gitqi-nav-styles');
         if (shared.navStyle) {
           if (destNavStyle) {
             destNavStyle.textContent = shared.navStyle.textContent;
           } else {
             const s = doc.createElement('style');
-            s.id = '__webby-nav-styles';
+            s.id = '__gitqi-nav-styles';
             s.textContent = shared.navStyle.textContent;
             doc.head.appendChild(s);
           }
@@ -764,8 +826,8 @@
     // data-editable-image, so bootstrap-generated images are always editable.
     section.querySelectorAll('img').forEach(img => {
       if (img.closest('[data-editor-ui]')) return;
-      if (img.dataset.webbyBound) return; // already activated (e.g. re-injection)
-      img.dataset.webbyBound = '1';
+      if (img.dataset.gitqiBound) return; // already activated (e.g. re-injection)
+      img.dataset.gitqiBound = '1';
       bindImageHandler(img);
     });
     // Ensure the section has an id matching its zone slug so anchor links work when deployed
@@ -836,11 +898,11 @@
       snapshotForUndo();
       // Clean up adjacent add-button
       const next = section.nextElementSibling;
-      if (next && next.classList.contains('__webby-add-wrap')) next.remove();
+      if (next && next.classList.contains('__gitqi-add-wrap')) next.remove();
       // Clean up any section-specific style block
       const slug = section.dataset.zone;
       if (slug) {
-        const sectionStyle = document.getElementById('__webby-section-' + slug + '-styles');
+        const sectionStyle = document.getElementById('__gitqi-section-' + slug + '-styles');
         if (sectionStyle) sectionStyle.remove();
       }
       section.remove();
@@ -942,22 +1004,22 @@
         Describe how you want the layout or structure changed. Content (text, images) will not be changed unless you ask.
       </p>
       <textarea
-        id="__webby-reformat-desc"
+        id="__gitqi-reformat-desc"
         placeholder="e.g. Remove the section title and add a third box to the right of the other two. Add a centered button at the bottom of each box."
         style="width:100%;height:104px;padding:12px 14px;border:1.5px solid ${T.border};border-radius:${T.radiusSm};
                font-size:13.5px;font-family:${T.fontBody};resize:vertical;box-sizing:border-box;
                line-height:1.55;outline:none;background:#fff;color:${T.primary};
                transition:border-color 0.18s ease, box-shadow 0.18s ease;"
       ></textarea>
-      <p id="__webby-reformat-error" style="display:none;margin:10px 0 0;font-size:12.5px;color:${T.danger};"></p>
+      <p id="__gitqi-reformat-error" style="display:none;margin:10px 0 0;font-size:12.5px;color:${T.danger};"></p>
       <div style="display:flex;gap:10px;margin-top:20px;justify-content:flex-end">
-        <button id="__webby-reformat-cancel"
+        <button id="__gitqi-reformat-cancel"
           style="padding:9px 20px;border:1.5px solid ${T.border};background:transparent;border-radius:${T.radiusPill};
                  cursor:pointer;font-size:13px;font-family:${T.fontBody};font-weight:500;color:${T.primary};
                  transition:background 0.18s ease, border-color 0.18s ease;">
           Cancel
         </button>
-        <button id="__webby-reformat-submit"
+        <button id="__gitqi-reformat-submit"
           style="padding:9px 22px;background:${T.accent};color:${T.primary};border:2px solid transparent;
                  border-radius:${T.radiusPill};cursor:pointer;font-size:13px;font-weight:600;
                  font-family:${T.fontBody};letter-spacing:-0.005em;box-shadow:${T.shadowCta};
@@ -970,10 +1032,10 @@
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    const textarea = modal.querySelector('#__webby-reformat-desc');
-    const errorEl = modal.querySelector('#__webby-reformat-error');
-    const submitBtn = modal.querySelector('#__webby-reformat-submit');
-    const cancelBtn = modal.querySelector('#__webby-reformat-cancel');
+    const textarea = modal.querySelector('#__gitqi-reformat-desc');
+    const errorEl = modal.querySelector('#__gitqi-reformat-error');
+    const submitBtn = modal.querySelector('#__gitqi-reformat-submit');
+    const cancelBtn = modal.querySelector('#__gitqi-reformat-cancel');
 
     textarea.focus();
     textarea.addEventListener('focus', () => {
@@ -1037,7 +1099,7 @@
 
     // Upsert a dedicated style element keyed to this section's zone slug
     const slug = section.dataset.zone || ('section-' + Date.now());
-    const styleId = '__webby-section-' + slug + '-styles';
+    const styleId = '__gitqi-section-' + slug + '-styles';
     let sectionStyleEl = document.getElementById(styleId);
     if (!sectionStyleEl) {
       sectionStyleEl = document.createElement('style');
@@ -1067,7 +1129,7 @@
 
     // Include any existing section-specific styles so AI can build on them
     const slug = section.dataset.zone || '';
-    const existingStyleEl = slug ? document.getElementById('__webby-section-' + slug + '-styles') : null;
+    const existingStyleEl = slug ? document.getElementById('__gitqi-section-' + slug + '-styles') : null;
     const existingSectionCSS = existingStyleEl ? existingStyleEl.textContent : '';
 
     // Clean copy of the section — strip editor UI before sending to AI
@@ -1075,7 +1137,7 @@
     clone.querySelectorAll('[data-editor-ui]').forEach(el => el.remove());
     clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
     clone.querySelectorAll('[spellcheck]').forEach(el => el.removeAttribute('spellcheck'));
-    clone.querySelectorAll('[data-webby-bound]').forEach(el => el.removeAttribute('data-webby-bound'));
+    clone.querySelectorAll('[data-gitqi-bound]').forEach(el => el.removeAttribute('data-gitqi-bound'));
 
     return `You are reformatting an existing HTML section for a website — both its HTML structure and its CSS.
 
@@ -1111,8 +1173,8 @@ RULES:
   function activateNav() {
     const nav = document.querySelector('nav');
     if (!nav) return;
-    if (nav.dataset.webbyNavBound) return;
-    nav.dataset.webbyNavBound = '1';
+    if (nav.dataset.gitqiNavBound) return;
+    nav.dataset.gitqiNavBound = '1';
 
     const btn = el('button', { 'data-editor-ui': '' });
     btn.textContent = '⟳ Reformat Nav';
@@ -1201,22 +1263,22 @@ RULES:
         Describe how to restructure the navigation. Links and labels are preserved unless you ask to change them.
       </p>
       <textarea
-        id="__webby-reformat-nav-desc"
+        id="__gitqi-reformat-nav-desc"
         placeholder="e.g. Make it a sticky horizontal bar with the logo on the left and links on the right, with a hamburger menu on mobile"
         style="width:100%;height:100px;padding:12px 14px;border:1.5px solid ${T.border};border-radius:${T.radiusSm};
                font-size:13.5px;font-family:${T.fontBody};resize:vertical;box-sizing:border-box;
                line-height:1.55;outline:none;background:#fff;color:${T.primary};
                transition:border-color 0.18s ease, box-shadow 0.18s ease;"
       ></textarea>
-      <p id="__webby-reformat-nav-error" style="display:none;margin:10px 0 0;font-size:12.5px;color:${T.danger};"></p>
+      <p id="__gitqi-reformat-nav-error" style="display:none;margin:10px 0 0;font-size:12.5px;color:${T.danger};"></p>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
-        <button id="__webby-reformat-nav-cancel"
+        <button id="__gitqi-reformat-nav-cancel"
           style="padding:9px 20px;border:1.5px solid ${T.border};background:transparent;border-radius:${T.radiusPill};
                  cursor:pointer;font-size:13px;font-family:${T.fontBody};font-weight:500;color:${T.primary};
                  transition:background 0.18s ease, border-color 0.18s ease;">
           Cancel
         </button>
-        <button id="__webby-reformat-nav-submit"
+        <button id="__gitqi-reformat-nav-submit"
           style="padding:9px 22px;background:${T.accent};color:${T.primary};border:2px solid transparent;
                  border-radius:${T.radiusPill};cursor:pointer;font-size:13px;font-weight:600;
                  font-family:${T.fontBody};letter-spacing:-0.005em;box-shadow:${T.shadowCta};
@@ -1228,10 +1290,10 @@ RULES:
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    const textarea = overlay.querySelector('#__webby-reformat-nav-desc');
-    const errorEl  = overlay.querySelector('#__webby-reformat-nav-error');
-    const submitBtn = overlay.querySelector('#__webby-reformat-nav-submit');
-    const cancelBtn = overlay.querySelector('#__webby-reformat-nav-cancel');
+    const textarea = overlay.querySelector('#__gitqi-reformat-nav-desc');
+    const errorEl  = overlay.querySelector('#__gitqi-reformat-nav-error');
+    const submitBtn = overlay.querySelector('#__gitqi-reformat-nav-submit');
+    const cancelBtn = overlay.querySelector('#__gitqi-reformat-nav-cancel');
 
     setTimeout(() => textarea.focus(), 50);
 
@@ -1293,15 +1355,15 @@ RULES:
     if (!newNav) throw new Error('AI did not return a valid <nav> element.');
 
     // Upsert a dedicated nav style element so we never touch the main <style> block
-    let navStyleEl = document.getElementById('__webby-nav-styles');
+    let navStyleEl = document.getElementById('__gitqi-nav-styles');
     if (!navStyleEl) {
       navStyleEl = document.createElement('style');
-      navStyleEl.id = '__webby-nav-styles';
+      navStyleEl.id = '__gitqi-nav-styles';
       document.head.appendChild(navStyleEl);
     }
     if (css) navStyleEl.textContent = css;
 
-    delete newNav.dataset.webbyNavBound;
+    delete newNav.dataset.gitqiNavBound;
     nav.replaceWith(newNav);
 
     // Re-apply toolbar offset to the new nav if it is fixed
@@ -1338,12 +1400,12 @@ RULES:
     const styleBlock = styleEl ? styleEl.textContent : '';
 
     // Include any existing nav-specific styles so AI can see what's already there
-    const existingNavStyles = document.getElementById('__webby-nav-styles');
+    const existingNavStyles = document.getElementById('__gitqi-nav-styles');
     const existingNavCSS = existingNavStyles ? existingNavStyles.textContent : '';
 
     const clone = nav.cloneNode(true);
     clone.querySelectorAll('[data-editor-ui]').forEach(el => el.remove());
-    clone.removeAttribute('data-webby-nav-bound');
+    clone.removeAttribute('data-gitqi-nav-bound');
 
     return `You are making a targeted change to an existing website navigation element.
 
@@ -1390,12 +1452,12 @@ RULES:
   }
 
   function refreshAddButtons() {
-    document.querySelectorAll('.__webby-add-wrap').forEach(el => el.remove());
+    document.querySelectorAll('.__gitqi-add-wrap').forEach(el => el.remove());
     injectAddSectionButtons();
   }
 
   function makeAddButton(insertAfterZone) {
-    const wrap = el('div', { 'data-editor-ui': '', class: '__webby-add-wrap' });
+    const wrap = el('div', { 'data-editor-ui': '', class: '__gitqi-add-wrap' });
     css(wrap, {
       display: 'flex',
       justifyContent: 'center',
@@ -1410,7 +1472,7 @@ RULES:
       padding: '6px 18px',
       background: 'rgba(26, 27, 58, 0.82)',
       color: T.bg,
-      border: `1.5px dashed ${T.accent3}`,
+      border: `1.5px solid ${T.accent3}`,
       borderRadius: T.radiusPill,
       cursor: 'pointer',
       fontSize: '11.5px',
@@ -1462,11 +1524,11 @@ RULES:
   // ─── Pages Manager ────────────────────────────────────────────────────────
 
   function openPagesPanel() {
-    const existing = document.getElementById('__webby-pages-panel');
+    const existing = document.getElementById('__gitqi-pages-panel');
     if (existing) { existing.remove(); return; }
 
     // Close theme panel if open
-    const themePanel = document.getElementById('__webby-theme-panel');
+    const themePanel = document.getElementById('__gitqi-theme-panel');
     if (themePanel) themePanel.remove();
 
     if (!pagesInventory) {
@@ -1474,7 +1536,7 @@ RULES:
       return;
     }
 
-    const panel = el('div', { id: '__webby-pages-panel', 'data-editor-ui': '' });
+    const panel = el('div', { id: '__gitqi-pages-panel', 'data-editor-ui': '' });
     css(panel, {
       position: 'fixed',
       top: '44px',
@@ -1506,8 +1568,8 @@ RULES:
       flexShrink: '0',
     });
     header.innerHTML = `<strong style="font-size:17px;color:${T.primary};font-family:${T.fontHead};font-weight:600;letter-spacing:-0.015em">Pages</strong>
-      <button id="__webby-pages-close" style="background:none;border:none;cursor:pointer;font-size:20px;color:${T.textMuted};line-height:1;padding:0 4px;transition:color 0.15s;">&times;</button>`;
-    const closeBtn = header.querySelector('#__webby-pages-close');
+      <button id="__gitqi-pages-close" style="background:none;border:none;cursor:pointer;font-size:20px;color:${T.textMuted};line-height:1;padding:0 4px;transition:color 0.15s;">&times;</button>`;
+    const closeBtn = header.querySelector('#__gitqi-pages-close');
     closeBtn.addEventListener('mouseenter', () => { closeBtn.style.color = T.primary; });
     closeBtn.addEventListener('mouseleave', () => { closeBtn.style.color = T.textMuted; });
     closeBtn.addEventListener('click', () => panel.remove());
@@ -1683,7 +1745,7 @@ RULES:
       <label style="display:block;margin-bottom:12px;">
         <span style="display:block;font-size:11px;font-weight:600;color:${T.primary};margin-bottom:5px;letter-spacing:0.04em;text-transform:uppercase;">Page description</span>
         <textarea
-          id="__webby-addpage-desc"
+          id="__gitqi-addpage-desc"
           placeholder="e.g. A services page listing massage therapy, physiotherapy, and acupuncture. Each service gets a card with a title, short description, and a Book Now button."
           style="width:100%;height:100px;padding:12px 14px;border:1.5px solid ${T.border};border-radius:${T.radiusSm};
                  font-size:13.5px;font-family:${T.fontBody};resize:vertical;box-sizing:border-box;
@@ -1693,23 +1755,23 @@ RULES:
       </label>
       <label style="display:block;margin-bottom:10px;">
         <span style="display:block;font-size:11px;font-weight:600;color:${T.primary};margin-bottom:5px;letter-spacing:0.04em;text-transform:uppercase;">Navigation label</span>
-        <input id="__webby-addpage-label" type="text" placeholder="e.g. Services"
+        <input id="__gitqi-addpage-label" type="text" placeholder="e.g. Services"
           style="width:100%;padding:9px 12px;border:1.5px solid ${T.border};border-radius:${T.radiusSm};
                  font-size:13.5px;font-family:${T.fontBody};box-sizing:border-box;outline:none;background:#fff;color:${T.primary};
                  transition:border-color 0.18s ease, box-shadow 0.18s ease;" />
       </label>
       <p style="margin:0 0 16px;font-size:11.5px;color:${T.textMuted};">
-        Filename: <span id="__webby-addpage-fname" style="font-family:${T.fontMono};color:${T.primary};">—</span>
+        Filename: <span id="__gitqi-addpage-fname" style="font-family:${T.fontMono};color:${T.primary};">—</span>
       </p>
-      <p id="__webby-addpage-error" style="display:none;margin:0 0 12px;font-size:12.5px;color:${T.danger};"></p>
+      <p id="__gitqi-addpage-error" style="display:none;margin:0 0 12px;font-size:12.5px;color:${T.danger};"></p>
       <div style="display:flex;gap:10px;justify-content:flex-end">
-        <button id="__webby-addpage-cancel"
+        <button id="__gitqi-addpage-cancel"
           style="padding:9px 20px;border:1.5px solid ${T.border};background:transparent;border-radius:${T.radiusPill};
                  cursor:pointer;font-size:13px;font-family:${T.fontBody};font-weight:500;color:${T.primary};
                  transition:background 0.18s ease, border-color 0.18s ease;">
           Cancel
         </button>
-        <button id="__webby-addpage-submit"
+        <button id="__gitqi-addpage-submit"
           style="padding:9px 22px;background:${T.accent};color:${T.primary};border:2px solid transparent;
                  border-radius:${T.radiusPill};cursor:pointer;font-size:13px;font-weight:600;
                  font-family:${T.fontBody};letter-spacing:-0.005em;box-shadow:${T.shadowCta};
@@ -1722,12 +1784,12 @@ RULES:
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    const descInput  = modal.querySelector('#__webby-addpage-desc');
-    const labelInput = modal.querySelector('#__webby-addpage-label');
-    const fnameEl    = modal.querySelector('#__webby-addpage-fname');
-    const errorEl    = modal.querySelector('#__webby-addpage-error');
-    const submitBtn  = modal.querySelector('#__webby-addpage-submit');
-    const cancelBtn  = modal.querySelector('#__webby-addpage-cancel');
+    const descInput  = modal.querySelector('#__gitqi-addpage-desc');
+    const labelInput = modal.querySelector('#__gitqi-addpage-label');
+    const fnameEl    = modal.querySelector('#__gitqi-addpage-fname');
+    const errorEl    = modal.querySelector('#__gitqi-addpage-error');
+    const submitBtn  = modal.querySelector('#__gitqi-addpage-submit');
+    const cancelBtn  = modal.querySelector('#__gitqi-addpage-cancel');
 
     function labelToFilename(label) {
       return label.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') + '.html';
@@ -1822,7 +1884,7 @@ RULES:
     if (currentNav) {
       addLinkToNav(currentNav, navLabel, './' + filename);
       // Re-activate so the reformat button is re-bound to the updated nav
-      delete currentNav.dataset.webbyNavBound;
+      delete currentNav.dataset.gitqiNavBound;
       activateNav();
     }
 
@@ -1879,7 +1941,7 @@ RULES:
     const styleBlock = styleEl ? styleEl.textContent : '';
 
     // Include nav-specific CSS if present — hamburger styles often live here after a reformat
-    const navStyleEl = document.getElementById('__webby-nav-styles');
+    const navStyleEl = document.getElementById('__gitqi-nav-styles');
     const navCSS     = navStyleEl ? navStyleEl.textContent.trim() : '';
 
     const nav = document.querySelector('nav');
@@ -1887,7 +1949,7 @@ RULES:
     if (nav) {
       const clone = nav.cloneNode(true);
       clone.querySelectorAll('[data-editor-ui]').forEach(n => n.remove());
-      clone.removeAttribute('data-webby-nav-bound');
+      clone.removeAttribute('data-gitqi-nav-bound');
       navHTML = clone.outerHTML;
     }
 
@@ -1941,7 +2003,7 @@ ${styleBlock}
 CURRENT NAVIGATION (copy this EXACTLY as-is — do not add, remove, or change anything; the new page link will be inserted automatically after generation):
 ${navHTML}
 ${navCSS ? `
-CURRENT NAVIGATION CSS (copy this verbatim into a <style id="__webby-nav-styles"> block in <head>, immediately after the main <style> block — do not modify it):
+CURRENT NAVIGATION CSS (copy this verbatim into a <style id="__gitqi-nav-styles"> block in <head>, immediately after the main <style> block — do not modify it):
 ${navCSS}
 ` : ''}
 EXAMPLE SECTION (match this markup style, class patterns, and data-* attributes exactly):
@@ -1954,13 +2016,13 @@ REQUIREMENTS:
 1. Return a complete, valid HTML document starting with <!DOCTYPE html>
 2. Copy the <style> block and any Google Fonts <link> from above into the new page's <head>
 3. Copy the nav HTML exactly as shown — do not modify it in any way (the new page link is handled separately)
-4. If CURRENT NAVIGATION CSS is provided above, copy it verbatim into a <style id="__webby-nav-styles"> block in <head>, immediately after the main <style> block
+4. If CURRENT NAVIGATION CSS is provided above, copy it verbatim into a <style id="__gitqi-nav-styles"> block in <head>, immediately after the main <style> block
 5. Every <section> must have: data-zone="{slug}" and data-zone-label="{Human Label}"
 6. Every editable text element must have: data-editable
 7. Every <img> must have: data-editable-image and src="./assets/placeholder.jpg"
 8. Include immediately after the <style> block (and nav CSS block if present) in <head>:
    <script src="./secrets.js"></script>
-   <script src="https://swill.github.io/webby/webby.js"></script>
+   <script src="https://swill.github.io/gitqi/gitqi.js"></script>
 9. Set an appropriate <title> and <meta name="description"> for this page
 10. Use only CSS variables from the style block — no hardcoded colours or font sizes
 11. Placeholder content should be realistic and relevant to the page description
@@ -2040,16 +2102,16 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
     bodyClone.querySelectorAll('[data-editor-ui]').forEach(n => n.remove());
     bodyClone.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
     bodyClone.querySelectorAll('[spellcheck]').forEach(n => n.removeAttribute('spellcheck'));
-    bodyClone.querySelectorAll('[data-webby-bound]').forEach(n => n.removeAttribute('data-webby-bound'));
-    bodyClone.querySelectorAll('[data-webby-nav-bound]').forEach(n => n.removeAttribute('data-webby-nav-bound'));
+    bodyClone.querySelectorAll('[data-gitqi-bound]').forEach(n => n.removeAttribute('data-gitqi-bound'));
+    bodyClone.querySelectorAll('[data-gitqi-nav-bound]').forEach(n => n.removeAttribute('data-gitqi-nav-bound'));
 
     const styleEl = document.querySelector('style');
 
     const sectionStyles = [];
-    document.querySelectorAll('style[id^="__webby-section-"]').forEach(s => {
+    document.querySelectorAll('style[id^="__gitqi-section-"]').forEach(s => {
       sectionStyles.push({ id: s.id, content: s.textContent });
     });
-    const navStyleEl = document.getElementById('__webby-nav-styles');
+    const navStyleEl = document.getElementById('__gitqi-nav-styles');
 
     return {
       bodyHTML:      bodyClone.innerHTML,
@@ -2088,8 +2150,8 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
     if (styleEl && snapshot.styleContent) styleEl.textContent = snapshot.styleContent;
 
     // Restore section-specific and nav style blocks
-    document.querySelectorAll('style[id^="__webby-section-"]').forEach(s => s.remove());
-    const existingNavStyles = document.getElementById('__webby-nav-styles');
+    document.querySelectorAll('style[id^="__gitqi-section-"]').forEach(s => s.remove());
+    const existingNavStyles = document.getElementById('__gitqi-nav-styles');
     if (existingNavStyles) existingNavStyles.remove();
     snapshot.sectionStyles.forEach(({ id, content }) => {
       const s = document.createElement('style');
@@ -2099,7 +2161,7 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
     });
     if (snapshot.navStyles) {
       const s = document.createElement('style');
-      s.id = '__webby-nav-styles';
+      s.id = '__gitqi-nav-styles';
       s.textContent = snapshot.navStyles;
       document.head.appendChild(s);
     }
@@ -2133,8 +2195,8 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
   }
 
   function updateUndoRedoButtons() {
-    const undoBtn = document.getElementById('__webby-undo-btn');
-    const redoBtn = document.getElementById('__webby-redo-btn');
+    const undoBtn = document.getElementById('__gitqi-undo-btn');
+    const redoBtn = document.getElementById('__gitqi-redo-btn');
     if (undoBtn) {
       undoBtn.disabled      = undoStack.length === 0;
       undoBtn.style.opacity = undoStack.length === 0 ? '0.35' : '1';
@@ -2191,6 +2253,7 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
       transition: 'opacity 0.2s',
       whiteSpace: 'nowrap',
       zIndex: '10',
+      border:'1px solid white',
     });
     parent.appendChild(hint);
 
@@ -2220,11 +2283,11 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
         // Folder is linked — save the image file locally so ./assets/... resolves correctly
         await writeImageToLocalDir(file);
         imgEl.src = `./${path}`;
-        imgEl.removeAttribute('data-webby-src');
+        imgEl.removeAttribute('data-gitqi-src');
       } else {
         // No local file access — display via blob URL; serializer swaps to relative path
         imgEl.src = URL.createObjectURL(new Blob([buffer], { type: file.type }));
-        imgEl.dataset.webbySrc = `./${path}`;
+        imgEl.dataset.gitqiSrc = `./${path}`;
       }
 
       setDirty(true);
@@ -2278,22 +2341,22 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
         Describe the section you want. Be specific — the more detail you give, the better the result.
       </p>
       <textarea
-        id="__webby-ai-desc"
+        id="__gitqi-ai-desc"
         placeholder="e.g. A testimonials section with 3 client quotes in cards, showing name, role, and a star rating"
         style="width:100%;height:104px;padding:12px 14px;border:1.5px solid ${T.border};border-radius:${T.radiusSm};
                font-size:13.5px;font-family:${T.fontBody};resize:vertical;box-sizing:border-box;
                line-height:1.55;outline:none;background:#fff;color:${T.primary};
                transition:border-color 0.18s ease, box-shadow 0.18s ease;"
       ></textarea>
-      <p id="__webby-ai-error" style="display:none;margin:10px 0 0;font-size:12.5px;color:${T.danger};"></p>
+      <p id="__gitqi-ai-error" style="display:none;margin:10px 0 0;font-size:12.5px;color:${T.danger};"></p>
       <div style="display:flex;gap:10px;margin-top:20px;justify-content:flex-end">
-        <button id="__webby-ai-cancel"
+        <button id="__gitqi-ai-cancel"
           style="padding:9px 20px;border:1.5px solid ${T.border};background:transparent;border-radius:${T.radiusPill};
                  cursor:pointer;font-size:13px;font-family:${T.fontBody};font-weight:500;color:${T.primary};
                  transition:background 0.18s ease, border-color 0.18s ease;">
           Cancel
         </button>
-        <button id="__webby-ai-submit"
+        <button id="__gitqi-ai-submit"
           style="padding:9px 22px;background:${T.accent};color:${T.primary};border:2px solid transparent;
                  border-radius:${T.radiusPill};cursor:pointer;font-size:13px;font-weight:600;
                  font-family:${T.fontBody};letter-spacing:-0.005em;box-shadow:${T.shadowCta};
@@ -2306,10 +2369,10 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    const textarea = modal.querySelector('#__webby-ai-desc');
-    const errorEl = modal.querySelector('#__webby-ai-error');
-    const submitBtn = modal.querySelector('#__webby-ai-submit');
-    const cancelBtn = modal.querySelector('#__webby-ai-cancel');
+    const textarea = modal.querySelector('#__gitqi-ai-desc');
+    const errorEl = modal.querySelector('#__gitqi-ai-error');
+    const submitBtn = modal.querySelector('#__gitqi-ai-submit');
+    const cancelBtn = modal.querySelector('#__gitqi-ai-cancel');
 
     textarea.focus();
     textarea.addEventListener('focus', () => {
@@ -2372,7 +2435,7 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
 
     const slug = section.dataset.zone || ('section-' + Date.now());
     if (css) {
-      const styleId = '__webby-section-' + slug + '-styles';
+      const styleId = '__gitqi-section-' + slug + '-styles';
       let sectionStyleEl = document.getElementById(styleId);
       if (!sectionStyleEl) {
         sectionStyleEl = document.createElement('style');
@@ -2464,7 +2527,7 @@ RULES:
     if (insertAfterZone) {
       // Insert after the zone's trailing add-button if it exists
       const next = insertAfterZone.nextElementSibling;
-      if (next && next.classList.contains('__webby-add-wrap')) {
+      if (next && next.classList.contains('__gitqi-add-wrap')) {
         next.after(section);
       } else {
         insertAfterZone.after(section);
@@ -2473,7 +2536,7 @@ RULES:
       const firstZone = document.querySelector('[data-zone]');
       if (firstZone) {
         const prev = firstZone.previousElementSibling;
-        if (prev && prev.classList.contains('__webby-add-wrap')) {
+        if (prev && prev.classList.contains('__gitqi-add-wrap')) {
           prev.before(section);
         } else {
           firstZone.before(section);
@@ -2490,7 +2553,7 @@ RULES:
 
   // ─── Serializer / Exporter ────────────────────────────────────────────────
 
-  // serialize({ local: false }) — for publish/export: strips secrets.js + webby.js so
+  // serialize({ local: false }) — for publish/export: strips secrets.js + gitqi.js so
   //   the deployed site has no editor code or credentials.
   // serialize({ local: true })  — for local file save: keeps those script tags so edit
   //   mode still activates next time the file is opened.
@@ -2505,23 +2568,36 @@ RULES:
     clone.querySelectorAll('[spellcheck]').forEach(el => el.removeAttribute('spellcheck'));
 
     // Resolve locally-displayed blob URLs back to their published relative paths
-    clone.querySelectorAll('img[data-webby-src]').forEach(img => {
-      img.setAttribute('src', img.dataset.webbySrc);
-      img.removeAttribute('data-webby-src');
+    clone.querySelectorAll('img[data-gitqi-src]').forEach(img => {
+      img.setAttribute('src', img.dataset.gitqiSrc);
+      img.removeAttribute('data-gitqi-src');
     });
 
     // Remove internal binding markers
-    clone.querySelectorAll('img[data-webby-bound]').forEach(img => {
-      img.removeAttribute('data-webby-bound');
+    clone.querySelectorAll('img[data-gitqi-bound]').forEach(img => {
+      img.removeAttribute('data-gitqi-bound');
     });
-    const navClone = clone.querySelector('nav[data-webby-nav-bound]');
-    if (navClone) navClone.removeAttribute('data-webby-nav-bound');
+    const navClone = clone.querySelector('nav[data-gitqi-nav-bound]');
+    if (navClone) navClone.removeAttribute('data-gitqi-nav-bound');
 
-    // For publish/export only: strip secrets.js and webby.js so they never go live
+    // Strip any inline style attribute on <html> — never meaningful output.
+    // Older versions also wrote CSS vars here for live preview; cleaned up here
+    // so those stale overrides don't leak into the published / saved HTML.
+    clone.removeAttribute('style');
+
+    // For publish/export only: strip secrets.js and gitqi.js so they never go live.
+    // Also strips the legacy webby.js filename so a page that hasn't been
+    // migrated in memory still publishes clean.
     if (!local) {
       clone.querySelectorAll('script').forEach(s => {
         const src = s.getAttribute('src') || '';
-        if (src.includes('secrets.js') || src.includes('webby.js')) s.remove();
+        if (src.includes('secrets.js') || src.includes('gitqi.js') || src.includes('webby.js')) s.remove();
+      });
+      // The data-gitqi-style marker is a runtime license to "unilaterally fix"
+      // inline-styled spans during editing. Deployed HTML doesn't need it; the
+      // spans stay with their inline styles intact.
+      clone.querySelectorAll(`span[${GITQI_STYLE_ATTR}]`).forEach(s => {
+        s.removeAttribute(GITQI_STYLE_ATTR);
       });
     }
 
@@ -2587,7 +2663,7 @@ RULES:
 
     async putFile(path, content, sha) {
       const body = {
-        message: 'Update site content via Webby',
+        message: 'Update site content via GitQi',
         content: btoa(unescape(encodeURIComponent(content))),
         branch,
       };
@@ -2634,7 +2710,7 @@ RULES:
       return;
     }
 
-    const btns = document.querySelectorAll('#__webby-toolbar button');
+    const btns = document.querySelectorAll('#__gitqi-toolbar button');
     btns.forEach(b => { b.disabled = true; });
 
     const pageCount = pagesInventory ? pagesInventory.pages.length : 1;
@@ -2661,9 +2737,10 @@ RULES:
             const pageFile = await fh.getFile();
             const text     = await pageFile.text();
             const doc      = new DOMParser().parseFromString(text, 'text/html');
+            migrateLegacyWebbyMarkersInDoc(doc);
             doc.querySelectorAll('script').forEach(s => {
               const src = s.getAttribute('src') || '';
-              if (src.includes('secrets.js') || src.includes('webby.js')) s.remove();
+              if (src.includes('secrets.js') || src.includes('gitqi.js') || src.includes('webby.js')) s.remove();
             });
             const stripped = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
             const pageSha  = await github.getFileSHA(page.file);
@@ -2676,8 +2753,8 @@ RULES:
         // 3. Publish the pages inventory
         try {
           const inventoryJson  = JSON.stringify(pagesInventory, null, 2);
-          const inventorySha   = await github.getFileSHA('webby-pages.json');
-          await github.putFile('webby-pages.json', inventoryJson, inventorySha);
+          const inventorySha   = await github.getFileSHA('gitqi-pages.json');
+          await github.putFile('gitqi-pages.json', inventoryJson, inventorySha);
         } catch (_) {}
       }
 
@@ -2754,7 +2831,12 @@ RULES:
   // <link rel="stylesheet"> (plus preconnects) into <head>; the sync then
   // propagates those links to every other page.
 
-  const GOOGLE_FONTS = [
+  // This array is the fallback catalog, used if the sibling google-fonts.json
+  // manifest can't be fetched (offline, CORS hiccup, or never generated). At
+  // init we try to replace its contents in place with the full manifest via
+  // loadGoogleFontsManifest() — hence `let` rather than `const`. All consumers
+  // (pickers, ensureGoogleFontLink, prune) read from this single reference.
+  let GOOGLE_FONTS = [
     // Sans-serif
     { name: 'Inter',              cat: 'sans-serif', weights: '300;400;500;600;700' },
     { name: 'Roboto',             cat: 'sans-serif', weights: '300;400;500;700' },
@@ -2811,6 +2893,40 @@ RULES:
     { name: 'Space Mono',         cat: 'monospace',  weights: '400;700' },
     { name: 'DM Mono',            cat: 'monospace',  weights: '400;500' },
   ];
+
+  // Full-catalog manifest loader. Fetches google-fonts.json from the same
+  // directory as gitqi.js, validates it, and replaces the curated fallback
+  // above. A localStorage copy is installed synchronously on the next load so
+  // the picker shows the full catalog immediately instead of waiting for the
+  // network. On any failure, the curated fallback remains active.
+  const FONTS_MANIFEST_URL = SCRIPT_BASE_URL ? SCRIPT_BASE_URL + 'google-fonts.json' : '';
+  const FONTS_CACHE_KEY = 'gitqi:fonts-manifest:v1';
+
+  function installFontsManifest(data) {
+    if (!Array.isArray(data) || data.length === 0) return false;
+    const sample = data[0];
+    if (!sample || typeof sample.name !== 'string' || typeof sample.weights !== 'string') return false;
+    GOOGLE_FONTS = data;
+    return true;
+  }
+
+  function loadGoogleFontsManifest() {
+    try {
+      const cached = localStorage.getItem(FONTS_CACHE_KEY);
+      if (cached) installFontsManifest(JSON.parse(cached));
+    } catch (_) { /* ignore cache read errors */ }
+
+    if (!FONTS_MANIFEST_URL) return;
+    fetch(FONTS_MANIFEST_URL, { cache: 'no-cache' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && installFontsManifest(data)) {
+          try { localStorage.setItem(FONTS_CACHE_KEY, JSON.stringify(data)); }
+          catch (_) { /* quota exceeded — fine, fetch will refresh next time */ }
+        }
+      })
+      .catch(() => { /* offline or CORS — curated fallback stays active */ });
+  }
 
   const GENERIC_FALLBACK = {
     'sans-serif':  'system-ui, sans-serif',
@@ -2869,13 +2985,13 @@ RULES:
     catch (_) { return m[1].replace(/\+/g, ' '); }
   }
 
-  // Concatenate every CSS block Webby manages (main <style>, nav style, per-section styles).
+  // Concatenate every CSS block GitQi manages (main <style>, nav style, per-section styles).
   // Used to detect whether a given font family is still referenced anywhere.
   function getAllManagedCSS() {
     const parts = [];
     const mainStyle = getMainStyleElement(document);
     if (mainStyle) parts.push(mainStyle.textContent);
-    document.querySelectorAll('style#__webby-nav-styles, style[id^="__webby-section-"]')
+    document.querySelectorAll('style#__gitqi-nav-styles, style[id^="__gitqi-section-"]')
       .forEach(s => parts.push(s.textContent));
     return parts.join('\n');
   }
@@ -2914,119 +3030,405 @@ RULES:
     }
   }
 
-  // Picker component: filterable list of Google Fonts. When clicked, an item
-  // applies the font (injects <link>, calls the caller's `onPick`).
-  function makeGoogleFontPicker(onPick) {
-    const container = el('div');
-    css(container, {
-      marginTop: '6px',
-      border: `1.5px solid ${T.border}`,
-      borderRadius: T.radiusSm,
-      background: '#fff',
-      overflow: 'hidden',
-    });
+  // ─── Font Previewer ───────────────────────────────────────────────────────
+  //
+  // Modal with live rendered previews of the full Google Fonts catalog. Fonts
+  // load via a rate-limited queue using the FontFace API — registrations live
+  // only in document.fonts, so nothing reaches disk, the serializer, the
+  // shared-head sync, or the published site.
+  //
+  // The picker itself is "dumb" — it reports the selection via `onPick` but
+  // does NOT commit <link> tags. Callers decide when to call
+  // ensureGoogleFontLink() so that cancelled / aborted picks don't leak font
+  // links into <head> (which shared-head sync would push to every page).
 
-    const filter = el('input');
-    filter.type = 'text';
-    filter.placeholder = 'Search Google Fonts…';
-    css(filter, {
-      width: '100%',
-      boxSizing: 'border-box',
-      padding: '7px 10px',
-      border: 'none',
-      borderBottom: `1px solid ${T.borderSoft}`,
-      fontSize: '11.5px',
+  const FONT_PREVIEW_SAMPLE_KEY = 'gitqi:font-preview-sample';
+  const DEFAULT_SAMPLE_TEXT = 'The quick brown fox jumps over the lazy dog';
+  const FONT_CATEGORIES = [
+    { key: 'all',         label: 'All' },
+    { key: 'sans-serif',  label: 'Sans Serif' },
+    { key: 'serif',       label: 'Serif' },
+    { key: 'display',     label: 'Display' },
+    { key: 'handwriting', label: 'Handwriting' },
+    { key: 'monospace',   label: 'Monospace' },
+  ];
+
+  // Rate-limited font preview loader.
+  //
+  // Previously used @import into a growing <style> element, which forced the
+  // browser to re-parse the whole preview stylesheet on every append and
+  // re-cascade every font-related element on the page — that's what caused
+  // the toolbar/title throb and the scroll stalls. The FontFace API registers
+  // fonts directly into document.fonts without any DOM mutation, so only
+  // elements that actually use the new family are affected.
+  //
+  // Flow per font: fetch Google's CSS2 response → parse out the @font-face
+  // src URLs → new FontFace(...) for each weight variant → face.load() →
+  // document.fonts.add(). Load completes with a real Promise, so preview rows
+  // can flip from placeholder to sample text only when their font is truly
+  // rendered.
+
+  const previewLoadedFonts  = new Set();  // names whose FontFaces are registered + rendered
+  const previewLoadingFonts = new Set();  // names currently fetching / loading
+  const previewFailedFonts  = new Set();  // names that failed (won't retry)
+  const previewQueuedFonts  = new Set();  // names currently in the queue
+  const previewLoadQueue    = [];         // pending font objects, FIFO
+  const previewLoadCallbacks = new Map(); // name → [fn, fn, ...] (fired when ready)
+
+  const PREVIEW_LOAD_BATCH = 4;           // concurrent loads per tick
+  const PREVIEW_LOAD_INTERVAL_MS = 250;   // ≈ 16 fonts/sec — gentle on Google + browser
+  let previewLoadTimer = null;
+
+  function onPreviewFontReady(name, callback) {
+    if (previewLoadedFonts.has(name)) { callback(); return; }
+    const list = previewLoadCallbacks.get(name) || [];
+    list.push(callback);
+    previewLoadCallbacks.set(name, list);
+  }
+
+  function firePreviewReady(name) {
+    const cbs = previewLoadCallbacks.get(name);
+    if (!cbs) return;
+    previewLoadCallbacks.delete(name);
+    cbs.forEach(cb => { try { cb(); } catch (_) { /* keep draining on single failure */ } });
+  }
+
+  async function loadPreviewFont(font) {
+    if (previewLoadedFonts.has(font.name) || previewLoadingFonts.has(font.name)) return;
+    previewLoadingFonts.add(font.name);
+    try {
+      const encoded = font.name.replace(/ /g, '+');
+      const url = `https://fonts.googleapis.com/css2?family=${encoded}:wght@${font.weights}&display=swap`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('css fetch failed: ' + res.status);
+      const css = await res.text();
+      // Parse every @font-face block in the response — one per weight variant.
+      const faces = [];
+      const faceRe = /@font-face\s*\{([^}]+)\}/g;
+      let m;
+      while ((m = faceRe.exec(css)) !== null) {
+        const block = m[1];
+        const srcM    = block.match(/src\s*:\s*([^;}]+)/i);
+        const weightM = block.match(/font-weight\s*:\s*([^;]+)/i);
+        const styleM  = block.match(/font-style\s*:\s*([^;]+)/i);
+        if (!srcM) continue;
+        faces.push(new FontFace(font.name, srcM[1].trim(), {
+          weight:  weightM ? weightM[1].trim() : '400',
+          style:   styleM  ? styleM[1].trim()  : 'normal',
+          display: 'swap',
+        }));
+      }
+      if (!faces.length) throw new Error('no @font-face in response');
+      // Load all variants in parallel; register each one as it arrives.
+      await Promise.all(faces.map(f => f.load().then(loaded => document.fonts.add(loaded))));
+      previewLoadedFonts.add(font.name);
+      firePreviewReady(font.name);
+    } catch (_) {
+      previewFailedFonts.add(font.name);
+    } finally {
+      previewLoadingFonts.delete(font.name);
+    }
+  }
+
+  function drainPreviewLoadQueue() {
+    if (!previewLoadQueue.length) { previewLoadTimer = null; return; }
+    for (let i = 0; i < PREVIEW_LOAD_BATCH && previewLoadQueue.length; i++) {
+      const font = previewLoadQueue.shift();
+      previewQueuedFonts.delete(font.name);
+      loadPreviewFont(font); // fire-and-forget; tracks its own state
+    }
+    previewLoadTimer = setTimeout(drainPreviewLoadQueue, PREVIEW_LOAD_INTERVAL_MS);
+  }
+
+  function queuePreviewFontLoad(font, priority) {
+    if (previewLoadedFonts.has(font.name)) return;
+    if (previewLoadingFonts.has(font.name)) return;
+    if (previewFailedFonts.has(font.name))  return;
+    if (previewQueuedFonts.has(font.name)) {
+      if (!priority) return;
+      // Already queued — bump to the head if we're prioritizing it.
+      const idx = previewLoadQueue.findIndex(f => f.name === font.name);
+      if (idx > 0) {
+        previewLoadQueue.splice(idx, 1);
+        previewLoadQueue.unshift(font);
+      }
+      return;
+    }
+    previewQueuedFonts.add(font.name);
+    if (priority) previewLoadQueue.unshift(font);
+    else          previewLoadQueue.push(font);
+    if (!previewLoadTimer) previewLoadTimer = setTimeout(drainPreviewLoadQueue, 0);
+  }
+
+  // Enqueue the full catalog in popularity order so by the time the user
+  // opens the previewer most popular fonts are already rendered. Safe to
+  // call repeatedly — dedup sets make re-calls a no-op.
+  function prewarmFontPreview() {
+    for (const font of GOOGLE_FONTS) queuePreviewFontLoad(font, false);
+  }
+
+  function openFontPreviewer(onPick) {
+    const overlay = el('div', { 'data-editor-ui': '' });
+    css(overlay, {
+      position: 'fixed', inset: '0', zIndex: '999998',
+      background: 'rgba(26, 27, 58, 0.4)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
       fontFamily: T.fontBody,
-      color: T.primary,
-      outline: 'none',
-      background: T.bg,
     });
 
-    const list = el('div');
-    css(list, { maxHeight: '180px', overflowY: 'auto' });
+    const modal = el('div');
+    css(modal, {
+      width: '640px', maxWidth: '92vw', height: '80vh', maxHeight: '760px',
+      background: T.bg, borderRadius: T.radius, boxShadow: T.shadow,
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    });
 
-    const render = query => {
+    // Header
+    const header = el('div');
+    css(header, {
+      padding: '14px 18px', borderBottom: `1px solid ${T.borderSoft}`,
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      flexShrink: '0',
+    });
+    const title = el('h2');
+    title.textContent = 'Font Previewer';
+    css(title, { margin: '0', fontFamily: T.fontHead, fontSize: '18px', fontWeight: '600', color: T.primary });
+    const closeBtn = el('button');
+    closeBtn.textContent = '✕';
+    css(closeBtn, { background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: T.textMuted, padding: '4px 10px', lineHeight: '1' });
+    header.append(title, closeBtn);
+
+    // Controls: sample text + category pills + search/sort row
+    const controls = el('div');
+    css(controls, {
+      padding: '12px 18px', borderBottom: `1px solid ${T.borderSoft}`,
+      display: 'flex', flexDirection: 'column', gap: '10px', flexShrink: '0',
+    });
+
+    const sampleInput = el('input');
+    sampleInput.type = 'text';
+    sampleInput.placeholder = 'Sample text';
+    try { sampleInput.value = localStorage.getItem(FONT_PREVIEW_SAMPLE_KEY) || DEFAULT_SAMPLE_TEXT; }
+    catch (_) { sampleInput.value = DEFAULT_SAMPLE_TEXT; }
+    css(sampleInput, {
+      width: '100%', boxSizing: 'border-box', padding: '8px 12px',
+      border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm,
+      fontSize: '14px', fontFamily: T.fontBody, color: T.primary,
+      background: '#fff', outline: 'none',
+    });
+
+    // Category pills
+    const pillRow = el('div');
+    css(pillRow, { display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' });
+    let activeCategory = 'all';
+    const pillEls = {};
+    const stylePill = (btn, active) => {
+      btn.style.background = active ? T.primary : 'transparent';
+      btn.style.color = active ? T.bg : T.primary;
+      btn.style.borderColor = active ? T.primary : T.border;
+    };
+    FONT_CATEGORIES.forEach(({ key, label }) => {
+      const pill = el('button');
+      pill.textContent = label;
+      css(pill, {
+        padding: '5px 11px', borderRadius: T.radiusPill,
+        fontSize: '11.5px', fontFamily: T.fontBody, fontWeight: '500',
+        cursor: 'pointer', border: `1.5px solid ${T.border}`,
+        transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+      });
+      stylePill(pill, key === activeCategory);
+      pill.addEventListener('click', () => {
+        activeCategory = key;
+        Object.entries(pillEls).forEach(([k, b]) => stylePill(b, k === activeCategory));
+        render();
+      });
+      pillEls[key] = pill;
+      pillRow.appendChild(pill);
+    });
+
+    // Search + sort
+    const searchRow = el('div');
+    css(searchRow, { display: 'flex', gap: '8px', alignItems: 'center' });
+    const searchInput = el('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Search by name…';
+    css(searchInput, {
+      flex: '1', padding: '6px 10px',
+      border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm,
+      fontSize: '11.5px', fontFamily: T.fontBody, color: T.primary,
+      background: '#fff', outline: 'none',
+    });
+
+    let sortMode = 'popularity';
+    const sortBtn = el('button');
+    sortBtn.textContent = 'Popularity';
+    css(sortBtn, {
+      padding: '6px 12px', background: 'transparent',
+      border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm,
+      fontSize: '11.5px', fontFamily: T.fontBody, fontWeight: '500',
+      cursor: 'pointer', color: T.primary, whiteSpace: 'nowrap',
+      transition: 'background 0.15s',
+    });
+    sortBtn.addEventListener('mouseenter', () => { sortBtn.style.background = T.bgAlt; });
+    sortBtn.addEventListener('mouseleave', () => { sortBtn.style.background = 'transparent'; });
+    sortBtn.addEventListener('click', () => {
+      sortMode = sortMode === 'popularity' ? 'alpha' : 'popularity';
+      sortBtn.textContent = sortMode === 'popularity' ? 'Popularity' : 'A–Z';
+      render();
+    });
+
+    searchRow.append(searchInput, sortBtn);
+    controls.append(sampleInput, pillRow, searchRow);
+
+    // List
+    const list = el('div');
+    css(list, { flex: '1', overflowY: 'auto', padding: '4px 0' });
+
+    let currentRows = [];
+    // Pending priority-jump queue: items the user has scrolled to, waiting out a
+    // short debounce so fast scrolls don't blast the rate-limiter with requests
+    // for rows the user just passed by.
+    const pendingPriority = new Set();
+    let priorityTimer = null;
+    function flushPriorityQueue() {
+      priorityTimer = null;
+      pendingPriority.forEach(font => queuePreviewFontLoad(font, true));
+      pendingPriority.clear();
+    }
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting && entry.target.__gitqiFont) {
+          pendingPriority.add(entry.target.__gitqiFont);
+          observer.unobserve(entry.target);
+        }
+      });
+      if (pendingPriority.size) {
+        if (priorityTimer) clearTimeout(priorityTimer);
+        priorityTimer = setTimeout(flushPriorityQueue, 500);
+      }
+    }, { root: list, rootMargin: '240px' });
+
+    function render() {
       list.innerHTML = '';
-      const q = (query || '').toLowerCase().trim();
-      const matches = q
-        ? GOOGLE_FONTS.filter(f => f.name.toLowerCase().includes(q) || f.cat.includes(q))
-        : GOOGLE_FONTS;
-      if (!matches.length) {
+      currentRows = [];
+      const q = searchInput.value.toLowerCase().trim();
+      let fonts = GOOGLE_FONTS;
+      if (activeCategory !== 'all') fonts = fonts.filter(f => f.cat === activeCategory);
+      if (q) fonts = fonts.filter(f => f.name.toLowerCase().includes(q));
+      if (sortMode === 'alpha') fonts = fonts.slice().sort((a, b) => a.name.localeCompare(b.name));
+
+      if (!fonts.length) {
         const empty = el('div');
         empty.textContent = 'No matches';
-        css(empty, { padding: '12px', fontSize: '11.5px', color: T.textMuted, textAlign: 'center', fontStyle: 'italic' });
+        css(empty, { padding: '24px', fontSize: '13px', color: T.textMuted, textAlign: 'center', fontStyle: 'italic' });
         list.appendChild(empty);
         return;
       }
-      matches.forEach(font => {
-        const item = el('div');
-        css(item, {
-          padding: '8px 12px',
-          fontSize: '13.5px',
-          color: T.primary,
-          cursor: 'pointer',
+
+      const sample = sampleInput.value || DEFAULT_SAMPLE_TEXT;
+      fonts.forEach(font => {
+        const row = el('div');
+        row.__gitqiFont = font;
+        css(row, {
+          display: 'flex', alignItems: 'center', gap: '14px',
+          padding: '10px 18px', cursor: 'pointer',
           borderBottom: `1px solid ${T.borderSoft}`,
-          fontFamily: fontFamilyStack(font),
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'baseline',
-          gap: '8px',
           transition: 'background 0.12s',
         });
-        // Note: we don't auto-load fonts for preview — that would inject a
-        // <link> for every font in the list and the shared-head sync would
-        // push all of them to every other page. Previews render in the
-        // fallback stack until the user actually picks a font.
 
-        const label = el('span');
-        label.textContent = font.name;
-        css(label, { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
-
-        const tag = el('span');
-        tag.textContent = font.cat;
-        css(tag, {
-          fontSize: '9px',
+        const nameEl = el('div');
+        nameEl.textContent = font.name;
+        css(nameEl, {
+          width: '140px', flexShrink: '0',
+          fontSize: '11.5px', fontFamily: T.fontBody, fontWeight: '500',
           color: T.textMuted,
-          fontFamily: T.fontBody,
-          textTransform: 'uppercase',
-          letterSpacing: '0.08em',
-          flexShrink: '0',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         });
 
-        item.append(label, tag);
+        // Rows for not-yet-loaded fonts render in the default body font with a
+        // "…" placeholder — this lets the entire list paint immediately so
+        // scrolling stays smooth. Once the FontFace is registered, we flip the
+        // row to the real font and replace "…" with the current sample text.
+        const loaded = previewLoadedFonts.has(font.name);
+        const sampleEl = el('div');
+        sampleEl.textContent = loaded ? sample : '…';
+        css(sampleEl, {
+          flex: '1', minWidth: '0',
+          fontSize: '20px', lineHeight: '1.3', color: loaded ? T.primary : T.textMuted,
+          fontFamily: loaded ? fontFamilyStack(font) : T.fontBody,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        });
+        if (!loaded) {
+          onPreviewFontReady(font.name, () => {
+            sampleEl.textContent = sampleInput.value || DEFAULT_SAMPLE_TEXT;
+            sampleEl.style.fontFamily = fontFamilyStack(font);
+            sampleEl.style.color = T.primary;
+          });
+        }
 
-        item.addEventListener('mouseenter', () => { item.style.background = T.bgAlt; });
-        item.addEventListener('mouseleave', () => { item.style.background = ''; });
-
-        // The picker is "dumb" — it reports the selection but does NOT inject
-        // the <link> tag. The caller decides when to commit (e.g. on Add) so
-        // that cancelled / aborted picks don't leak font links into <head>
-        // (which the shared-head sync would then push to every page).
-        item.addEventListener('click', () => {
+        row.append(nameEl, sampleEl);
+        row.addEventListener('mouseenter', () => { row.style.background = T.bgAlt; });
+        row.addEventListener('mouseleave', () => { row.style.background = ''; });
+        row.addEventListener('click', () => {
           if (onPick) onPick(font, fontFamilyStack(font));
+          close();
         });
 
-        list.appendChild(item);
+        list.appendChild(row);
+        currentRows.push(row);
+        observer.observe(row);
       });
-    };
+    }
 
-    filter.addEventListener('input', () => render(filter.value));
-    render('');
+    sampleInput.addEventListener('input', () => {
+      const v = sampleInput.value || DEFAULT_SAMPLE_TEXT;
+      try { localStorage.setItem(FONT_PREVIEW_SAMPLE_KEY, sampleInput.value); } catch (_) {}
+      // Only update rows whose font has already loaded — unloaded rows keep
+      // their "…" placeholder until the font arrives, then pick up the latest
+      // sample via the onPreviewFontReady callback.
+      currentRows.forEach(r => {
+        if (r.children[1] && previewLoadedFonts.has(r.__gitqiFont.name)) {
+          r.children[1].textContent = v;
+        }
+      });
+    });
+    searchInput.addEventListener('input', render);
 
-    container.append(filter, list);
-    return container;
+    modal.append(header, controls, list);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    function close() {
+      observer.disconnect();
+      if (priorityTimer) { clearTimeout(priorityTimer); priorityTimer = null; }
+      pendingPriority.clear();
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    closeBtn.addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', onKey);
+
+    render();
+    setTimeout(() => sampleInput.focus(), 0);
   }
 
   // ─── Theme Editor ─────────────────────────────────────────────────────────
 
   function openThemeEditor() {
-    if (document.getElementById('__webby-theme-panel')) {
-      document.getElementById('__webby-theme-panel').remove();
+    if (document.getElementById('__gitqi-theme-panel')) {
+      document.getElementById('__gitqi-theme-panel').remove();
       return;
     }
     // Close pages panel if open (they occupy the same side-panel slot)
-    const pagesPanel = document.getElementById('__webby-pages-panel');
+    const pagesPanel = document.getElementById('__gitqi-pages-panel');
     if (pagesPanel) pagesPanel.remove();
+
+    // Start prewarming the font preview cache. By the time the user opens the
+    // font picker, most popular fonts are already rendered; scroll-into-view
+    // still jumps the queue for anything not yet loaded.
+    prewarmFontPreview();
 
     const styleEl = document.querySelector('style');
     if (!styleEl) {
@@ -3040,7 +3442,7 @@ RULES:
       return;
     }
 
-    const panel = el('div', { id: '__webby-theme-panel', 'data-editor-ui': '' });
+    const panel = el('div', { id: '__gitqi-theme-panel', 'data-editor-ui': '' });
     css(panel, {
       position: 'fixed',
       top: '44px',
@@ -3248,7 +3650,7 @@ RULES:
       const titleEl = document.querySelector('title');
       if (titleEl) titleEl.textContent = titleInput.value;
       // Also update the toolbar site name if present
-      const toolbarTitle = document.getElementById('__webby-title');
+      const toolbarTitle = document.getElementById('__gitqi-title');
       if (toolbarTitle) toolbarTitle.textContent = titleInput.value || 'Site Editor';
       setDirty(true);
     });
@@ -3355,6 +3757,132 @@ RULES:
         section.appendChild(makeVarRow(varName, varValue, styleEl));
       }
 
+      // "Add color variable" button — only on the Colors group.
+      // New --color-* vars are auto-picked up by the selection toolbar's text
+      // color flyout (getThemeVars('--color')) and distributed to every page
+      // by the shared-head sync (main <style> is synced site-wide).
+      if (groupName === 'Colors') {
+        const addColorBtn = el('button');
+        addColorBtn.textContent = '＋ Add color variable';
+        css(addColorBtn, {
+          marginTop: '8px',
+          padding: '7px 12px',
+          background: 'transparent',
+          border: `1.5px dashed ${T.border}`,
+          borderRadius: T.radiusSm,
+          fontSize: '11.5px',
+          color: T.textMuted,
+          cursor: 'pointer',
+          width: '100%',
+          textAlign: 'left',
+          fontFamily: T.fontBody,
+          fontWeight: '500',
+          transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+        });
+        addColorBtn.addEventListener('mouseenter', () => { addColorBtn.style.background = T.bgAlt; addColorBtn.style.borderColor = T.accent2; addColorBtn.style.color = T.primary; });
+        addColorBtn.addEventListener('mouseleave', () => { addColorBtn.style.background = 'transparent'; addColorBtn.style.borderColor = T.border; addColorBtn.style.color = T.textMuted; });
+
+        addColorBtn.addEventListener('click', () => {
+          addColorBtn.style.display = 'none';
+
+          const form = el('div');
+          css(form, { marginTop: '6px' });
+
+          // Row 1: prefix label + name input
+          const nameRow = el('div');
+          css(nameRow, { display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '5px' });
+
+          const prefix = el('span');
+          prefix.textContent = '--color-';
+          css(prefix, { fontSize: '11px', fontFamily: T.fontMono, color: T.textMuted, flexShrink: '0' });
+
+          const nameInput = el('input');
+          nameInput.type = 'text';
+          nameInput.placeholder = 'brand';
+          css(nameInput, { flex: '1', minWidth: '0', padding: '5px 8px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, fontSize: '11px', fontFamily: T.fontMono, background: '#fff', color: T.primary, outline: 'none' });
+
+          nameRow.append(prefix, nameInput);
+
+          // Row 2: native picker + hex input, kept in sync
+          const valueRow = el('div');
+          css(valueRow, { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' });
+
+          const colorPicker = el('input');
+          colorPicker.type = 'color';
+          colorPicker.value = '#6366f1';
+          css(colorPicker, { width: '30px', height: '28px', padding: '1px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, cursor: 'pointer', flexShrink: '0', background: '#fff' });
+
+          const hexInput = el('input');
+          hexInput.type = 'text';
+          hexInput.value = colorPicker.value;
+          hexInput.spellcheck = false;
+          css(hexInput, { flex: '1', minWidth: '0', padding: '5px 8px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, fontSize: '11px', fontFamily: T.fontMono, background: '#fff', color: T.primary, outline: 'none' });
+
+          colorPicker.addEventListener('input', () => { hexInput.value = colorPicker.value; });
+          hexInput.addEventListener('input', () => {
+            const v = hexInput.value.trim();
+            if (/^#[0-9a-f]{6}$/i.test(v)) colorPicker.value = v;
+          });
+
+          valueRow.append(colorPicker, hexInput);
+
+          // Row 3: action buttons
+          const btnRow = el('div');
+          css(btnRow, { display: 'flex', gap: '6px' });
+
+          const confirmBtn = el('button');
+          confirmBtn.textContent = 'Add';
+          css(confirmBtn, { padding: '5px 14px', background: T.accent, color: T.primary, border: '2px solid transparent', borderRadius: T.radiusPill, fontSize: '11.5px', fontWeight: '600', cursor: 'pointer', fontFamily: T.fontBody, boxShadow: T.shadowCta, transition: 'background 0.15s, transform 0.15s' });
+          confirmBtn.addEventListener('mouseenter', () => { confirmBtn.style.background = T.accent2; confirmBtn.style.transform = 'translateY(-1px)'; });
+          confirmBtn.addEventListener('mouseleave', () => { confirmBtn.style.background = T.accent; confirmBtn.style.transform = 'translateY(0)'; });
+
+          const cancelBtn = el('button');
+          cancelBtn.textContent = 'Cancel';
+          css(cancelBtn, { padding: '5px 14px', background: 'transparent', border: `1.5px solid ${T.border}`, borderRadius: T.radiusPill, fontSize: '11.5px', cursor: 'pointer', fontFamily: T.fontBody, fontWeight: '500', color: T.primary, transition: 'background 0.15s' });
+          cancelBtn.addEventListener('mouseenter', () => { cancelBtn.style.background = T.bgAlt; });
+          cancelBtn.addEventListener('mouseleave', () => { cancelBtn.style.background = 'transparent'; });
+
+          btnRow.append(confirmBtn, cancelBtn);
+          form.append(nameRow, valueRow, btnRow);
+          section.appendChild(form);
+          nameInput.focus();
+
+          cancelBtn.addEventListener('click', () => {
+            form.remove();
+            addColorBtn.style.display = '';
+          });
+
+          const doAdd = () => {
+            const nameSuffix = nameInput.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+            const value = hexInput.value.trim();
+            if (!nameSuffix || !/^#[0-9a-f]{6}$/i.test(value)) {
+              (nameSuffix ? hexInput : nameInput).focus();
+              return;
+            }
+
+            const varName = '--color-' + nameSuffix;
+            if (styleEl.textContent.includes(varName + ':')) {
+              nameInput.style.borderColor = T.danger;
+              nameInput.title = 'Variable already exists';
+              return;
+            }
+
+            addStyleVar(styleEl, varName, value);
+            setDirty(true);
+
+            form.remove();
+            addColorBtn.style.display = '';
+            section.insertBefore(makeVarRow(varName, value, styleEl), addColorBtn);
+          };
+
+          confirmBtn.addEventListener('click', doAdd);
+          nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') hexInput.focus(); });
+          hexInput.addEventListener('keydown', e => { if (e.key === 'Enter') doAdd(); });
+        });
+
+        section.appendChild(addColorBtn);
+      }
+
       // "Add font variable" button — only on the Typography group
       if (groupName === 'Typography') {
         const addFontBtn = el('button');
@@ -3404,17 +3932,31 @@ RULES:
           valueInput.placeholder = "'Playfair Display', serif";
           css(valueInput, { width: '100%', boxSizing: 'border-box', padding: '5px 8px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, fontSize: '11px', fontFamily: T.fontMono, marginBottom: '6px', background: '#fff', color: T.primary, outline: 'none' });
 
-          // Row 3: Google Fonts picker — fills in the value + auto-suggests a variable
-          // name. The <link> is injected on commit (doAdd), not on preview click.
+          // Row 3: "Browse fonts" button — opens the font previewer modal.
+          // Selection fills in the value only; the variable name is left for
+          // the user to choose (names should describe the role, e.g. "display"
+          // or "accent", not the current font — fonts change, names shouldn't).
+          // The <link> is injected on commit (doAdd), not on preview click.
           let pickedFont = null;
-          const picker = makeGoogleFontPicker((font, value) => {
-            pickedFont = font;
-            valueInput.value = value;
-            if (!nameInput.value.trim()) {
-              nameInput.value = font.name.toLowerCase().replace(/ /g, '-');
-            }
+          const browseBtn = el('button');
+          browseBtn.textContent = 'Browse Google Fonts…';
+          css(browseBtn, {
+            width: '100%', boxSizing: 'border-box',
+            padding: '7px 10px', marginBottom: '6px',
+            background: 'transparent', border: `1.5px solid ${T.border}`,
+            borderRadius: T.radiusSm,
+            fontSize: '11.5px', fontFamily: T.fontBody, fontWeight: '500',
+            color: T.primary, cursor: 'pointer', textAlign: 'center',
+            transition: 'background 0.15s, border-color 0.15s',
           });
-          css(picker, { marginBottom: '6px' });
+          browseBtn.addEventListener('mouseenter', () => { browseBtn.style.background = T.bgAlt; browseBtn.style.borderColor = T.accent2; });
+          browseBtn.addEventListener('mouseleave', () => { browseBtn.style.background = 'transparent'; browseBtn.style.borderColor = T.border; });
+          browseBtn.addEventListener('click', () => {
+            openFontPreviewer((font, value) => {
+              pickedFont = font;
+              valueInput.value = value;
+            });
+          });
           // If the user types a custom value, the picked-font link is no longer
           // accurate — clear the tracked pick so we don't inject an unused link.
           valueInput.addEventListener('input', () => {
@@ -3438,7 +3980,7 @@ RULES:
           cancelBtn.addEventListener('mouseleave', () => { cancelBtn.style.background = 'transparent'; });
 
           btnRow.append(confirmBtn, cancelBtn);
-          form.append(nameRow, valueInput, picker, btnRow);
+          form.append(nameRow, valueInput, browseBtn, btnRow);
           section.appendChild(form);
           nameInput.focus();
 
@@ -3454,15 +3996,13 @@ RULES:
 
             const varName = '--font-' + nameSuffix;
             // Guard against duplicates
-            if (document.documentElement.style.getPropertyValue(varName) ||
-                styleEl.textContent.includes(varName + ':')) {
+            if (styleEl.textContent.includes(varName + ':')) {
               nameInput.style.borderColor = T.danger;
               nameInput.title = 'Variable already exists';
               return;
             }
 
             addStyleVar(styleEl, varName, value);
-            document.documentElement.style.setProperty(varName, value);
             if (pickedFont) ensureGoogleFontLink(pickedFont);
             setDirty(true);
 
@@ -3523,7 +4063,6 @@ RULES:
       css(hexInput, { width: '78px', padding: '5px 8px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, fontSize: '11px', fontFamily: T.fontMono, flexShrink: '0', background: '#fff', color: T.primary, outline: 'none' });
 
       const apply = val => {
-        document.documentElement.style.setProperty(varName, val);
         updateStyleVar(styleEl, varName, val);
         setDirty(true);
       };
@@ -3547,7 +4086,6 @@ RULES:
       css(input, { width: '116px', padding: '5px 8px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, fontSize: '11px', fontFamily: T.fontMono, background: '#fff', color: T.primary, outline: 'none' });
       const applyValue = val => {
         input.value = val;
-        document.documentElement.style.setProperty(varName, val);
         updateStyleVar(styleEl, varName, val);
         setDirty(true);
       };
@@ -3564,10 +4102,6 @@ RULES:
         row.append(label, input);
         return row;
       }
-
-      // Wrapper holds the row + (when toggled open) the picker beneath.
-      // Row keeps its own marginBottom so rows stay spaced whether or not picker is open.
-      const wrapper = el('div');
 
       const toggleBtn = el('button');
       toggleBtn.textContent = 'Aa';
@@ -3587,36 +4121,22 @@ RULES:
         flexShrink: '0',
         transition: 'background 0.15s, border-color 0.15s',
       });
+      toggleBtn.addEventListener('mouseenter', () => { toggleBtn.style.background = T.bgAlt; toggleBtn.style.borderColor = T.accent2; });
+      toggleBtn.addEventListener('mouseleave', () => { toggleBtn.style.background = '#fff';   toggleBtn.style.borderColor = T.border; });
 
       // Narrow the value input so there's room for the toggle button
       css(input, { width: '84px' });
 
       row.append(label, input, toggleBtn);
 
-      let pickerEl = null;
       toggleBtn.addEventListener('click', () => {
-        if (pickerEl) {
-          pickerEl.remove();
-          pickerEl = null;
-          toggleBtn.style.background = '#fff';
-          toggleBtn.style.borderColor = T.border;
-          return;
-        }
-        toggleBtn.style.background = T.accent2;
-        toggleBtn.style.borderColor = 'transparent';
-        pickerEl = makeGoogleFontPicker((font, value) => {
+        openFontPreviewer((font, value) => {
           applyValue(value);
           ensureGoogleFontLink(font);
-          pickerEl.remove();
-          pickerEl = null;
-          toggleBtn.style.background = '#fff';
-          toggleBtn.style.borderColor = T.border;
         });
-        wrapper.appendChild(pickerEl);
       });
 
-      wrapper.prepend(row);
-      return wrapper;
+      return row;
     }
 
     return row;
@@ -3754,7 +4274,7 @@ RULES:
     // steals focus, or after the flyout is opened.
     const savedRange = range.cloneRange();
 
-    const bar = el('div', { id: '__webby-sel-toolbar', 'data-editor-ui': '' });
+    const bar = el('div', { id: '__gitqi-sel-toolbar', 'data-editor-ui': '' });
     css(bar, {
       position: 'fixed',
       zIndex: '1000002',
@@ -3852,8 +4372,8 @@ RULES:
         return;
       }
       // Wrap selection in a new <a> using a sentinel href, then open the popover
-      document.execCommand('createLink', false, '__webby_new__');
-      const newLink = document.querySelector('a[href="__webby_new__"]');
+      document.execCommand('createLink', false, '__gitqi_new__');
+      const newLink = document.querySelector('a[href="__gitqi_new__"]');
       if (newLink) {
         newLink.setAttribute('href', '');
         hideSelectionToolbar();
@@ -3880,7 +4400,14 @@ RULES:
     css(fontBtn, { fontFamily: T.fontHead, fontWeight: '600', fontSize: '12px' });
     fontBtn.title = 'Font family';
 
-    row.append(boldBtn, italicBtn, colorBtn, fontBtn, codeBtn, linkBtn);
+    // Font-size button — opens a flyout with relative size presets
+    const fontSizeBtn = makeSelBtn('A\u2195', false, () => {
+      toggleFlyout(flyout, 'fontSize', () => populateFontSizeFlyout(flyout, savedRange));
+    });
+    css(fontSizeBtn, { fontFamily: T.fontHead, fontWeight: '600', fontSize: '12px' });
+    fontSizeBtn.title = 'Font size';
+
+    row.append(boldBtn, italicBtn, colorBtn, fontBtn, fontSizeBtn, codeBtn, linkBtn);
     bar.append(row, flyout);
     document.body.appendChild(bar);
     selectionToolbar = bar;
@@ -3938,17 +4465,35 @@ RULES:
     sel.addRange(savedRange);
   }
 
-  // Wrap the current selection in a <span> with an inline style. Used for
-  // color and font-family applied from the selection toolbar flyouts.
+  // Marker on every span created by the selection toolbar. It's our "license
+  // to unilaterally fix" — scoping auto-cleanup to these spans means we never
+  // mutate hand-authored markup, and every text style we apply (color, font,
+  // future font-size) goes through the same replace-don't-nest path.
+  const GITQI_STYLE_ATTR = 'data-gitqi-style';
+
+  // Wrap the current selection in a gitqi-owned <span> with an inline style.
+  // Before wrapping, strip the same property from any inline-styled span the
+  // selection fully covers so repeated font/color changes replace rather than
+  // nest — and so legacy nests authored before this marker existed collapse
+  // as soon as the user re-applies a style. A partial selection inside a
+  // larger styled span still nests — correct, since the outer style still
+  // applies to the unselected portion (and we never mutate hand-authored
+  // markup whose extent isn't fully covered).
   function wrapSelectionInStyledSpan(property, value) {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
-    const r = sel.getRangeAt(0);
-    const anchor = sel.anchorNode;
+    clearInlineStyleFromSelection(property, { onlyIfFullyCovered: true });
+
+    // Re-acquire the selection — cleanup may have unwrapped spans around it.
+    const sel2 = window.getSelection();
+    if (!sel2 || sel2.rangeCount === 0 || sel2.isCollapsed) return;
+    const r = sel2.getRangeAt(0);
+    const anchor = sel2.anchorNode;
     const editable = anchor &&
       (anchor.nodeType === Node.TEXT_NODE ? anchor.parentElement : anchor).closest('[data-editable]');
     if (!editable) return;
     const span = document.createElement('span');
+    span.setAttribute(GITQI_STYLE_ATTR, '');
     span.style[property] = value;
     try {
       r.surroundContents(span);
@@ -3961,23 +4506,33 @@ RULES:
     setDirty(true);
   }
 
-  // Remove an inline style (e.g. color) from every span within the selection.
-  // Unwraps spans that end up with no remaining attributes.
-  function clearInlineStyleFromSelection(property) {
+  // Remove an inline style property from <span>s touched by the current
+  // selection. Unwraps spans that end up with no remaining styles or attributes.
+  //
+  // Scope is any inline-styled <span>, gitqi-owned or legacy — so pre-marker
+  // nested styling collapses on re-apply or explicit clear. The full-coverage
+  // guard is what keeps this safe: we only strip a property from a span if the
+  // selection covers ALL of that span's contents. Hand-authored styling that
+  // extends beyond the selection is never mutated.
+  //
+  //   onlyIfFullyCovered: true  — used by the pre-wrap cleanup.
+  //   onlyIfFullyCovered: false — used by the explicit Remove / Clear buttons
+  //     (user is being explicit, so any intersecting span is fair game).
+  function clearInlineStyleFromSelection(property, { onlyIfFullyCovered = false } = {}) {
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
     const r = sel.getRangeAt(0);
     const anchor = sel.anchorNode;
     const editable = anchor &&
       (anchor.nodeType === Node.TEXT_NODE ? anchor.parentElement : anchor).closest('[data-editable]');
-    if (!editable) return;
+    if (!editable) return false;
 
     const candidates = new Set();
     editable.querySelectorAll('span').forEach(s => {
       if (r.intersectsNode(s)) candidates.add(s);
     });
-    // Include span ancestors of the range endpoints — they enclose the selection
-    // but wouldn't be caught by intersectsNode scan of descendants.
+    // Include span ancestors of the range endpoints — they enclose the
+    // selection but wouldn't be caught by the intersectsNode descendant scan.
     const walkUp = node => {
       let n = node && (node.nodeType === Node.TEXT_NODE ? node.parentElement : node);
       while (n && n !== editable) {
@@ -3991,11 +4546,19 @@ RULES:
     let changed = false;
     candidates.forEach(span => {
       if (!span.style[property]) return;
+      if (onlyIfFullyCovered) {
+        const spanRange = document.createRange();
+        spanRange.selectNodeContents(span);
+        const startsBefore = r.compareBoundaryPoints(Range.START_TO_START, spanRange) <= 0;
+        const endsAfter    = r.compareBoundaryPoints(Range.END_TO_END,   spanRange) >= 0;
+        if (!(startsBefore && endsAfter)) return;
+      }
       span.style[property] = '';
       changed = true;
       const styleAttr = span.getAttribute('style');
       if (!styleAttr || !styleAttr.trim()) {
         span.removeAttribute('style');
+        span.removeAttribute(GITQI_STYLE_ATTR);
         if (span.attributes.length === 0) {
           const parent = span.parentNode;
           while (span.firstChild) parent.insertBefore(span.firstChild, span);
@@ -4005,6 +4568,7 @@ RULES:
     });
 
     if (changed) setDirty(true);
+    return changed;
   }
 
   function populateColorFlyout(flyout, savedRange) {
@@ -4243,6 +4807,89 @@ RULES:
       list.appendChild(item);
     });
 
+    // Clear — strip font-family from gitqi-owned spans in the selection. Lets
+    // the user revert text back to inheriting the zone's default font without
+    // manually editing HTML.
+    const clearBtn = el('button', { 'data-editor-ui': '' });
+    clearBtn.title = 'Remove font styling from the selected text';
+    css(clearBtn, {
+      marginTop: '4px',
+      padding: '6px 10px',
+      background: 'transparent',
+      border: 'none',
+      borderTop: '1px solid rgba(253, 251, 245, 0.12)',
+      color: 'rgba(253, 251, 245, 0.7)',
+      cursor: 'pointer',
+      fontSize: '12px',
+      fontFamily: T.fontBody,
+      fontStyle: 'italic',
+      textAlign: 'left',
+      width: '100%',
+      transition: 'color 0.12s, background 0.12s',
+    });
+    clearBtn.textContent = '✕  Clear font styling';
+    clearBtn.addEventListener('mouseenter', () => { clearBtn.style.background = 'rgba(253, 251, 245, 0.08)'; clearBtn.style.color = T.bg; });
+    clearBtn.addEventListener('mouseleave', () => { clearBtn.style.background = 'transparent'; clearBtn.style.color = 'rgba(253, 251, 245, 0.7)'; });
+    clearBtn.addEventListener('mousedown', e => {
+      e.preventDefault();
+      restoreSavedRange(savedRange);
+      clearInlineStyleFromSelection('fontFamily');
+      hideSelectionToolbar();
+    });
+    list.appendChild(clearBtn);
+
+    flyout.appendChild(list);
+  }
+
+  // Relative presets in `em` so a bump inside a heading stays heading-scaled
+  // and a bump in body stays body-scaled — the size is always relative to the
+  // surrounding text. "Normal" has no value — it strips the font-size span
+  // instead of writing a redundant font-size:1em.
+  const FONT_SIZE_PRESETS = [
+    { label: 'Smaller', value: '0.75em',  preview: '0.85em' },
+    { label: 'Small',   value: '0.875em', preview: '0.92em' },
+    { label: 'Normal',  value: null,      preview: '1em'    },
+    { label: 'Large',   value: '1.25em',  preview: '1.12em' },
+    { label: 'Larger',  value: '1.5em',   preview: '1.24em' },
+    { label: 'Huge',    value: '2em',     preview: '1.4em'  },
+  ];
+
+  function populateFontSizeFlyout(flyout, savedRange) {
+    const list = el('div');
+    css(list, { display: 'flex', flexDirection: 'column', gap: '2px', maxWidth: '220px' });
+
+    FONT_SIZE_PRESETS.forEach(({ label, value, preview }) => {
+      const item = el('button', { 'data-editor-ui': '', title: value || 'Inherit surrounding size' });
+      item.textContent = label;
+      css(item, {
+        padding: '6px 10px',
+        background: 'transparent',
+        border: 'none',
+        borderRadius: '6px',
+        color: T.bg,
+        cursor: 'pointer',
+        fontSize: preview,
+        fontFamily: T.fontBody,
+        textAlign: 'left',
+        width: '100%',
+        transition: 'background 0.12s',
+        lineHeight: '1.25',
+      });
+      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(253, 251, 245, 0.1)'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+      item.addEventListener('mousedown', e => {
+        e.preventDefault();
+        restoreSavedRange(savedRange);
+        if (value) {
+          wrapSelectionInStyledSpan('fontSize', value);
+        } else {
+          clearInlineStyleFromSelection('fontSize');
+        }
+        hideSelectionToolbar();
+      });
+      list.appendChild(item);
+    });
+
     flyout.appendChild(list);
   }
 
@@ -4346,7 +4993,7 @@ RULES:
   function openLinkPopover(link) {
     closeLinkPopover();
 
-    const popover = el('div', { 'data-editor-ui': '', id: '__webby-link-popover' });
+    const popover = el('div', { 'data-editor-ui': '', id: '__gitqi-link-popover' });
     css(popover, {
       position: 'fixed',
       zIndex: '1000001',
@@ -4365,7 +5012,7 @@ RULES:
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
         <span style="font-size:11px;font-weight:700;text-transform:uppercase;
                      letter-spacing:0.1em;color:${T.textMuted};">Edit Link</span>
-        <a id="__webby-link-goto" href="#" target="_self"
+        <a id="__gitqi-link-goto" href="#" target="_self"
           style="font-size:11px;color:${T.primary};text-decoration:none;padding:4px 10px;
                  border-radius:${T.radiusPill};background:${T.bgAlt};border:1px solid ${T.borderSoft};display:none;font-weight:500;">
           Go to link →
@@ -4374,20 +5021,20 @@ RULES:
 
       <label style="display:block;margin-bottom:11px;">
         <span style="display:block;font-size:11px;font-weight:600;color:${T.primary};margin-bottom:5px;letter-spacing:0.04em;text-transform:uppercase;">Display text</span>
-        <input id="__webby-link-text" type="text" value=""
+        <input id="__gitqi-link-text" type="text" value=""
           style="width:100%;padding:7px 10px;border:1.5px solid ${T.border};border-radius:${T.radiusSm};
                  font-size:13px;box-sizing:border-box;font-family:${T.fontBody};background:#fff;color:${T.primary};outline:none;transition:border-color 0.15s;" />
       </label>
 
       <label style="display:block;margin-bottom:8px;">
         <span style="display:block;font-size:11px;font-weight:600;color:${T.primary};margin-bottom:5px;letter-spacing:0.04em;text-transform:uppercase;">URL</span>
-        <input id="__webby-link-url" type="text" value=""
+        <input id="__gitqi-link-url" type="text" value=""
           style="width:100%;padding:7px 10px;border:1.5px solid ${T.border};border-radius:${T.radiusSm};
                  font-size:12.5px;box-sizing:border-box;font-family:${T.fontMono};background:#fff;color:${T.primary};outline:none;transition:border-color 0.15s;" />
       </label>
 
-      <div id="__webby-link-picker-wrap" style="margin-bottom:12px;">
-        <select id="__webby-link-picker"
+      <div id="__gitqi-link-picker-wrap" style="margin-bottom:12px;">
+        <select id="__gitqi-link-picker"
           style="width:100%;padding:7px 10px;border:1.5px solid ${T.border};border-radius:${T.radiusSm};
                  font-size:12px;font-family:${T.fontBody};color:${T.primary};background:#fff;outline:none;cursor:pointer;">
           <option value="">— Jump to a page or section —</option>
@@ -4395,19 +5042,19 @@ RULES:
       </div>
 
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:16px;">
-        <input id="__webby-link-blank" type="checkbox"
+        <input id="__gitqi-link-blank" type="checkbox"
           style="width:15px;height:15px;cursor:pointer;accent-color:${T.secondary};" />
         <span style="font-size:12.5px;color:${T.primary};">Open in new tab</span>
       </label>
 
       <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button id="__webby-link-remove"
+        <button id="__gitqi-link-remove"
           style="padding:7px 14px;border:1.5px solid ${T.border};background:transparent;color:${T.textMuted};
                  border-radius:${T.radiusPill};cursor:pointer;font-size:12px;font-family:${T.fontBody};font-weight:500;
                  transition:background 0.15s, border-color 0.15s, color 0.15s;">
           Remove link
         </button>
-        <button id="__webby-link-done"
+        <button id="__gitqi-link-done"
           style="padding:7px 18px;background:${T.accent};color:${T.primary};border:2px solid transparent;
                  border-radius:${T.radiusPill};cursor:pointer;font-size:12px;font-weight:600;font-family:${T.fontBody};
                  box-shadow:${T.shadowCta};transition:background 0.15s, transform 0.15s;">
@@ -4420,11 +5067,11 @@ RULES:
     activeLinkPopover = popover;
 
     // Populate fields
-    const textInput  = popover.querySelector('#__webby-link-text');
-    const urlInput   = popover.querySelector('#__webby-link-url');
-    const blankCheck = popover.querySelector('#__webby-link-blank');
-    const gotoBtn    = popover.querySelector('#__webby-link-goto');
-    const picker     = popover.querySelector('#__webby-link-picker');
+    const textInput  = popover.querySelector('#__gitqi-link-text');
+    const urlInput   = popover.querySelector('#__gitqi-link-url');
+    const blankCheck = popover.querySelector('#__gitqi-link-blank');
+    const gotoBtn    = popover.querySelector('#__gitqi-link-goto');
+    const picker     = popover.querySelector('#__gitqi-link-picker');
 
     textInput.value    = link.textContent;
     urlInput.value     = link.getAttribute('href') || '';
@@ -4495,7 +5142,7 @@ RULES:
       });
     } else {
       // No inventory — hide the picker
-      popover.querySelector('#__webby-link-picker-wrap').style.display = 'none';
+      popover.querySelector('#__gitqi-link-picker-wrap').style.display = 'none';
     }
 
     // Position below the link, within viewport
@@ -4528,12 +5175,12 @@ RULES:
       inp.addEventListener('blur',  () => { inp.style.borderColor = T.border; inp.style.boxShadow = 'none'; });
     });
 
-    const doneBtn = popover.querySelector('#__webby-link-done');
+    const doneBtn = popover.querySelector('#__gitqi-link-done');
     doneBtn.addEventListener('mouseenter', () => { doneBtn.style.background = T.accent2; doneBtn.style.transform = 'translateY(-1px)'; });
     doneBtn.addEventListener('mouseleave', () => { doneBtn.style.background = T.accent; doneBtn.style.transform = 'translateY(0)'; });
     doneBtn.addEventListener('click', closeLinkPopover);
 
-    const removeBtn = popover.querySelector('#__webby-link-remove');
+    const removeBtn = popover.querySelector('#__gitqi-link-remove');
     removeBtn.addEventListener('mouseenter', () => { removeBtn.style.background = T.accent4; removeBtn.style.color = '#fff'; removeBtn.style.borderColor = 'transparent'; });
     removeBtn.addEventListener('mouseleave', () => { removeBtn.style.background = 'transparent'; removeBtn.style.color = T.textMuted; removeBtn.style.borderColor = T.border; });
     removeBtn.addEventListener('click', () => {
@@ -4582,10 +5229,103 @@ RULES:
     css(popover, { top: top + 'px', left: left + 'px' });
   }
 
+  // ─── Legacy Webby → GitQi migration ───────────────────────────────────────
+  //
+  // v1.2.x and earlier shipped as "Webby" and used the data-webby-*, __webby-*,
+  // and webby-pages.json namespaces. On first load with GitQi we detect those
+  // markers and rewrite them in place. The migration is silent and idempotent —
+  // after the first auto-save writes the updated HTML, subsequent loads find
+  // nothing to migrate and this is a no-op.
+  //
+  // In-DOM migration runs synchronously before activateZones() so the rest of
+  // the editor only ever sees the new namespace. On-disk migration (pages
+  // inventory file, script src in saved HTML) happens inside the code paths
+  // that touch those things.
+
+  function migrateLegacyWebbyMarkers() {
+    let migrated = false;
+
+    // 1. Rename data-webby-* attributes to data-gitqi-*.
+    const attrMap = {
+      'data-webby-src':       'data-gitqi-src',
+      'data-webby-style':     'data-gitqi-style',
+      'data-webby-bound':     'data-gitqi-bound',
+      'data-webby-nav-bound': 'data-gitqi-nav-bound',
+    };
+    for (const [oldAttr, newAttr] of Object.entries(attrMap)) {
+      document.querySelectorAll('[' + oldAttr + ']').forEach(node => {
+        node.setAttribute(newAttr, node.getAttribute(oldAttr));
+        node.removeAttribute(oldAttr);
+        migrated = true;
+      });
+    }
+
+    // 2. Rename __webby-nav-styles and __webby-section-*-styles <style> ids.
+    const legacyNavStyle = document.getElementById('__webby-nav-styles');
+    if (legacyNavStyle) {
+      legacyNavStyle.id = '__gitqi-nav-styles';
+      migrated = true;
+    }
+    document.querySelectorAll('style[id^="__webby-section-"]').forEach(s => {
+      s.id = s.id.replace('__webby-section-', '__gitqi-section-');
+      migrated = true;
+    });
+
+    // 3. Rewrite <script src=".../webby.js"> (or pinned webby-*.js) to gitqi.js
+    //    so the saved HTML loads GitQi on its next open. The publish serializer
+    //    strips any script whose src matches webby.js or gitqi.js regardless,
+    //    so this is purely for the local edit-mode HTML.
+    document.querySelectorAll('script[src]').forEach(s => {
+      const src = s.getAttribute('src') || '';
+      if (/(^|\/)webby(-[0-9][^/]*)?\.js(\?|#|$)/.test(src)) {
+        s.setAttribute('src', src.replace(/webby(-[0-9][^/]*)?\.js/, 'gitqi.js'));
+        migrated = true;
+      }
+    });
+
+    if (migrated) setDirty(true);
+  }
+
+  // Same migration, applied to a parsed HTMLDocument read from disk. Used by
+  // the shared-head sync and publish paths so legacy pages get rewritten on
+  // any cross-page write, without requiring the user to open each page.
+  function migrateLegacyWebbyMarkersInDoc(doc) {
+    const attrMap = {
+      'data-webby-src':       'data-gitqi-src',
+      'data-webby-style':     'data-gitqi-style',
+      'data-webby-bound':     'data-gitqi-bound',
+      'data-webby-nav-bound': 'data-gitqi-nav-bound',
+    };
+    for (const [oldAttr, newAttr] of Object.entries(attrMap)) {
+      doc.querySelectorAll('[' + oldAttr + ']').forEach(node => {
+        node.setAttribute(newAttr, node.getAttribute(oldAttr));
+        node.removeAttribute(oldAttr);
+      });
+    }
+    const legacyNav = doc.getElementById('__webby-nav-styles');
+    if (legacyNav) legacyNav.id = '__gitqi-nav-styles';
+    doc.querySelectorAll('style[id^="__webby-section-"]').forEach(s => {
+      s.id = s.id.replace('__webby-section-', '__gitqi-section-');
+    });
+    doc.querySelectorAll('script[src]').forEach(s => {
+      const src = s.getAttribute('src') || '';
+      if (/(^|\/)webby(-[0-9][^/]*)?\.js(\?|#|$)/.test(src)) {
+        s.setAttribute('src', src.replace(/webby(-[0-9][^/]*)?\.js/, 'gitqi.js'));
+      }
+    });
+  }
+
   // ─── Init ─────────────────────────────────────────────────────────────────
 
   async function init() {
+    loadGoogleFontsManifest();
+    // Older versions wrote CSS vars as inline styles on <html> for live preview,
+    // which then shadowed :root updates from undo/redo, reformat, and sync —
+    // stripping any existing attribute lets the <style> :root block be the sole
+    // source of truth going forward.
+    document.documentElement.removeAttribute('style');
     injectToolbar();
+    migrateLegacyWebbyMarkers();
     activateZones();
     activateNav();
     bindMutationObserver();
@@ -4608,6 +5348,6 @@ RULES:
     init();
   }
 
-  window.Webby = { version: VERSION, serialize, exportToFile, publish: publishSite };
+  window.GitQi = { version: VERSION, serialize, exportToFile, publish: publishSite };
 
 })();
