@@ -835,6 +835,14 @@
       img.dataset.gitqiBound = '1';
       bindImageHandler(img);
     });
+    // Bind video handlers to [data-editable-video] wrappers (iframes eat pointer
+    // events so we bind on the wrapper and inject a click-intercept overlay).
+    section.querySelectorAll('[data-editable-video]').forEach(wrapper => {
+      if (wrapper.closest('[data-editor-ui]')) return;
+      if (wrapper.dataset.gitqiVideoBound) return;
+      wrapper.dataset.gitqiVideoBound = '1';
+      bindVideoHandler(wrapper);
+    });
     // Ensure the section has an id matching its zone slug so anchor links work when deployed
     if (section.dataset.zone && !section.id) section.id = section.dataset.zone;
     injectDeleteButton(section);
@@ -1016,6 +1024,16 @@
                line-height:1.55;outline:none;background:#fff;color:${T.primary};
                transition:border-color 0.18s ease, box-shadow 0.18s ease;"
       ></textarea>
+      <div style="margin-top:10px;padding:10px 12px;background:${T.bgAlt};border-radius:${T.radiusSm};
+                  font-size:11.5px;color:${T.textMuted};line-height:1.55;border-left:3px solid ${T.secondary};">
+        <strong style="color:${T.primary};font-weight:600;">Tip:</strong>
+        ask to add <strong style="color:${T.primary};font-weight:600;">images</strong>
+        (<em>"add a photo beside the text"</em>) or
+        <strong style="color:${T.primary};font-weight:600;">YouTube videos</strong>
+        (<em>"embed a video below the heading"</em>) — click any image afterwards to
+        upload your own, or click any video to paste a YouTube URL. Existing images
+        and videos are preserved unless you ask to change them.
+      </div>
       <p id="__gitqi-reformat-error" style="display:none;margin:10px 0 0;font-size:12.5px;color:${T.danger};"></p>
       <div style="display:flex;gap:10px;margin-top:20px;justify-content:flex-end">
         <button id="__gitqi-reformat-cancel"
@@ -1157,11 +1175,16 @@ REFORMAT INSTRUCTION:
 "${description}"
 
 RULES:
-- Preserve ALL existing text content, images, and links exactly as-is unless the instruction explicitly says to change them
+- Preserve ALL existing text content, images, videos, and links exactly as-is unless the instruction explicitly says to change them
 - You may freely change HTML structure, CSS classes, layout, responsive behaviour, and media queries
 - Use only the CSS variables defined above — no hardcoded colours or font sizes
 - Keep data-zone and data-zone-label attributes on the <section> element
 - Keep data-editable on all text elements and data-editable-image on all img elements
+- Preserve any existing <div data-editable-video>...</div> wrappers verbatim (including the inline styles, the nested <iframe>, its src, and all its attributes) — you may reposition them but must not alter their internal structure
+- If the instruction asks you to ADD a video, insert this exact wrapper (the user will replace the placeholder URL):
+    <div data-editable-video style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:var(--radius);">
+      <iframe src="https://www.youtube.com/embed/M7lc1UVf-VE" title="YouTube video player" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+    </div>
 - Return your response in EXACTLY this format with no other text:
 
 <section-css>
@@ -1757,6 +1780,15 @@ RULES:
                  line-height:1.55;outline:none;background:#fff;color:${T.primary};
                  transition:border-color 0.18s ease, box-shadow 0.18s ease;"
         ></textarea>
+        <div style="margin-top:8px;padding:10px 12px;background:${T.bgAlt};border-radius:${T.radiusSm};
+                    font-size:11.5px;color:${T.textMuted};line-height:1.55;border-left:3px solid ${T.accent2};">
+          <strong style="color:${T.primary};font-weight:600;">Tip:</strong>
+          ask for <strong style="color:${T.primary};font-weight:600;">images</strong>
+          (<em>"a team photo at the top"</em>) or
+          <strong style="color:${T.primary};font-weight:600;">YouTube videos</strong>
+          (<em>"embed an intro video"</em>) — after the page is generated you can
+          click any image to upload your own or click any video to paste a YouTube URL.
+        </div>
       </label>
       <label style="display:block;margin-bottom:10px;">
         <span style="display:block;font-size:11px;font-weight:600;color:${T.primary};margin-bottom:5px;letter-spacing:0.04em;text-transform:uppercase;">Navigation label</span>
@@ -2025,12 +2057,17 @@ REQUIREMENTS:
 5. Every <section> must have: data-zone="{slug}" and data-zone-label="{Human Label}"
 6. Every editable text element must have: data-editable
 7. Every <img> must have: data-editable-image and src="./assets/placeholder.jpg"
-8. Include immediately after the <style> block (and nav CSS block if present) in <head>:
+8. For video embeds, use EXACTLY this wrapper (the placeholder video is a safe, always-embeddable demo — user will swap it):
+     <div data-editable-video style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:var(--radius);">
+       <iframe src="https://www.youtube.com/embed/M7lc1UVf-VE" title="YouTube video player" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+     </div>
+   Never use <video> tags, other embed providers, or a different wrapper shape — the editor binds to the [data-editable-video] marker.
+9. Include immediately after the <style> block (and nav CSS block if present) in <head>:
    <script src="./secrets.js"></script>
    <script src="https://swill.github.io/gitqi/gitqi.js"></script>
-9. Set an appropriate <title> and <meta name="description"> for this page
-10. Use only CSS variables from the style block — no hardcoded colours or font sizes
-11. Placeholder content should be realistic and relevant to the page description
+10. Set an appropriate <title> and <meta name="description"> for this page
+11. Use only CSS variables from the style block — no hardcoded colours or font sizes
+12. Placeholder content should be realistic and relevant to the page description
 
 Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!DOCTYPE html>.`;
   }
@@ -2109,6 +2146,7 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
     bodyClone.querySelectorAll('[spellcheck]').forEach(n => n.removeAttribute('spellcheck'));
     bodyClone.querySelectorAll('[data-gitqi-bound]').forEach(n => n.removeAttribute('data-gitqi-bound'));
     bodyClone.querySelectorAll('[data-gitqi-nav-bound]').forEach(n => n.removeAttribute('data-gitqi-nav-bound'));
+    bodyClone.querySelectorAll('[data-gitqi-video-bound]').forEach(n => n.removeAttribute('data-gitqi-video-bound'));
 
     const styleEl = document.querySelector('style');
 
@@ -2139,6 +2177,7 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
 
     // Close any open overlays so their stale DOM references are dropped
     closeLinkPopover();
+    closeVideoPopover();
     hideSelectionToolbar();
 
     // Save editor UI nodes (toolbar, banner, panels) — they have live event listeners
@@ -2311,6 +2350,265 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
     return btoa(binary);
   }
 
+  // ─── Video Manager ────────────────────────────────────────────────────────
+  //
+  // Videos are embedded as <iframe> inside a <div data-editable-video> wrapper.
+  // Iframes swallow pointer events, so we inject a transparent click-intercept
+  // overlay on top of the iframe (analogous to the image hover hint) and open
+  // a URL popover when clicked. Users paste a YouTube URL in any common form
+  // and we normalise it to the /embed/ID form.
+
+  let activeVideoPopover = null;
+
+  // Accepts common YouTube URL shapes and returns the 11-char video id, or null.
+  //   https://www.youtube.com/watch?v=ID
+  //   https://youtu.be/ID
+  //   https://www.youtube.com/embed/ID
+  //   https://www.youtube-nocookie.com/embed/ID
+  //   https://www.youtube.com/shorts/ID
+  // Bare 11-char ids are also accepted so users can paste just the id.
+  function extractYouTubeId(url) {
+    if (!url) return null;
+    const trimmed = url.trim();
+    if (/^[A-Za-z0-9_-]{11}$/.test(trimmed)) return trimmed;
+    const patterns = [
+      /[?&]v=([A-Za-z0-9_-]{11})/,
+      /youtu\.be\/([A-Za-z0-9_-]{11})/,
+      /\/embed\/([A-Za-z0-9_-]{11})/,
+      /\/shorts\/([A-Za-z0-9_-]{11})/,
+    ];
+    for (const p of patterns) {
+      const m = trimmed.match(p);
+      if (m) return m[1];
+    }
+    return null;
+  }
+
+  function youtubeEmbedURL(id) {
+    return 'https://www.youtube.com/embed/' + id;
+  }
+
+  function bindVideoHandler(wrapper) {
+    if (getComputedStyle(wrapper).position === 'static') wrapper.style.position = 'relative';
+
+    // Transparent overlay over the iframe to intercept clicks + show hover hint.
+    // Marked data-editor-ui so the serializer strips it from published output.
+    const overlay = el('div', { 'data-editor-ui': '' });
+    css(overlay, {
+      position: 'absolute',
+      inset: '0',
+      cursor: 'pointer',
+      zIndex: '10',
+      background: 'transparent',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      transition: 'background 0.2s',
+    });
+
+    const hint = el('div');
+    hint.textContent = 'Click to change video';
+    css(hint, {
+      background: T.primary,
+      color: T.bg,
+      padding: '8px 16px',
+      borderRadius: T.radiusPill,
+      fontSize: '12px',
+      fontWeight: '500',
+      fontFamily: T.fontBody,
+      boxShadow: '0 8px 20px -6px rgba(26, 27, 58, 0.45)',
+      pointerEvents: 'none',
+      opacity: '0',
+      transition: 'opacity 0.2s',
+      whiteSpace: 'nowrap',
+      border: '1px solid white',
+    });
+    overlay.appendChild(hint);
+
+    overlay.addEventListener('mouseenter', () => {
+      hint.style.opacity = '1';
+      overlay.style.background = 'rgba(26, 27, 58, 0.12)';
+    });
+    overlay.addEventListener('mouseleave', () => {
+      hint.style.opacity = '0';
+      overlay.style.background = 'transparent';
+    });
+
+    overlay.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      openVideoPopover(wrapper);
+    });
+
+    wrapper.appendChild(overlay);
+  }
+
+  function openVideoPopover(wrapper) {
+    closeVideoPopover();
+
+    const iframe = wrapper.querySelector('iframe');
+    const currentURL = iframe ? (iframe.getAttribute('src') || '') : '';
+
+    const popover = el('div', { 'data-editor-ui': '', id: '__gitqi-video-popover' });
+    css(popover, {
+      position: 'fixed',
+      zIndex: '1000001',
+      background: T.bg,
+      border: `1px solid ${T.border}`,
+      borderRadius: T.radius,
+      padding: '16px 18px',
+      width: '360px',
+      boxShadow: T.shadow,
+      fontFamily: T.fontBody,
+      fontSize: '13px',
+      color: T.primary,
+    });
+
+    popover.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <span style="font-size:11px;font-weight:700;text-transform:uppercase;
+                     letter-spacing:0.1em;color:${T.textMuted};">Edit Video</span>
+        <a id="__gitqi-video-goto" href="#" target="_blank" rel="noopener noreferrer"
+          style="font-size:11px;color:${T.primary};text-decoration:none;padding:4px 10px;
+                 border-radius:${T.radiusPill};background:${T.bgAlt};border:1px solid ${T.borderSoft};display:none;font-weight:500;">
+          Go to video →
+        </a>
+      </div>
+
+      <label style="display:block;margin-bottom:10px;">
+        <span style="display:block;font-size:11px;font-weight:600;color:${T.primary};margin-bottom:5px;letter-spacing:0.04em;text-transform:uppercase;">YouTube URL</span>
+        <input id="__gitqi-video-url" type="text" placeholder="https://www.youtube.com/watch?v=…"
+          style="width:100%;padding:7px 10px;border:1.5px solid ${T.border};border-radius:${T.radiusSm};
+                 font-size:12.5px;box-sizing:border-box;font-family:${T.fontMono};background:#fff;color:${T.primary};outline:none;transition:border-color 0.15s;" />
+      </label>
+
+      <div id="__gitqi-video-error"
+        style="display:none;font-size:11.5px;color:${T.danger};margin-bottom:10px;line-height:1.4;">
+        Unrecognised YouTube URL. Paste a watch, youtu.be, embed, or shorts link.
+      </div>
+
+      <p style="margin:0 0 14px;font-size:11px;color:${T.textMuted};line-height:1.5;">
+        Paste a YouTube link in any form — watch, youtu.be, embed, or shorts.
+      </p>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button id="__gitqi-video-remove"
+          style="padding:7px 14px;border:1.5px solid ${T.border};background:transparent;color:${T.textMuted};
+                 border-radius:${T.radiusPill};cursor:pointer;font-size:12px;font-family:${T.fontBody};font-weight:500;
+                 transition:background 0.15s, border-color 0.15s, color 0.15s;">
+          Remove video
+        </button>
+        <button id="__gitqi-video-apply"
+          style="padding:7px 18px;background:${T.accent};color:${T.primary};border:2px solid transparent;
+                 border-radius:${T.radiusPill};cursor:pointer;font-size:12px;font-weight:600;font-family:${T.fontBody};
+                 box-shadow:${T.shadowCta};transition:background 0.15s, transform 0.15s;">
+          Apply
+        </button>
+      </div>
+    `;
+
+    document.body.appendChild(popover);
+    activeVideoPopover = popover;
+
+    const urlInput = popover.querySelector('#__gitqi-video-url');
+    const gotoBtn  = popover.querySelector('#__gitqi-video-goto');
+    const errorEl  = popover.querySelector('#__gitqi-video-error');
+    const applyBtn = popover.querySelector('#__gitqi-video-apply');
+    const removeBtn = popover.querySelector('#__gitqi-video-remove');
+
+    urlInput.value = currentURL;
+
+    function refreshGotoBtn() {
+      const id = extractYouTubeId(urlInput.value);
+      if (id) {
+        gotoBtn.href = 'https://www.youtube.com/watch?v=' + id;
+        gotoBtn.style.display = '';
+      } else {
+        gotoBtn.style.display = 'none';
+      }
+    }
+    refreshGotoBtn();
+
+    urlInput.addEventListener('input', () => {
+      errorEl.style.display = 'none';
+      urlInput.style.borderColor = T.secondary;
+      refreshGotoBtn();
+    });
+    urlInput.addEventListener('focus', () => {
+      urlInput.style.borderColor = T.secondary;
+      urlInput.style.boxShadow = '0 0 0 3px rgba(217, 70, 239, 0.12)';
+    });
+    urlInput.addEventListener('blur', () => {
+      urlInput.style.borderColor = T.border;
+      urlInput.style.boxShadow = 'none';
+    });
+
+    function applyURL() {
+      const raw = urlInput.value.trim();
+      if (!raw) {
+        errorEl.textContent = 'Please paste a YouTube URL.';
+        errorEl.style.display = '';
+        return;
+      }
+      const id = extractYouTubeId(raw);
+      if (!id) {
+        errorEl.textContent = 'Unrecognised YouTube URL. Paste a watch, youtu.be, embed, or shorts link.';
+        errorEl.style.display = '';
+        urlInput.style.borderColor = T.danger;
+        return;
+      }
+      if (iframe) {
+        iframe.setAttribute('src', youtubeEmbedURL(id));
+        setDirty(true);
+      }
+      closeVideoPopover();
+    }
+
+    applyBtn.addEventListener('mouseenter', () => { applyBtn.style.background = T.accent2; applyBtn.style.transform = 'translateY(-1px)'; });
+    applyBtn.addEventListener('mouseleave', () => { applyBtn.style.background = T.accent; applyBtn.style.transform = 'translateY(0)'; });
+    applyBtn.addEventListener('click', applyURL);
+
+    urlInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); applyURL(); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeVideoPopover(); }
+    });
+
+    removeBtn.addEventListener('mouseenter', () => { removeBtn.style.background = T.accent4; removeBtn.style.color = '#fff'; removeBtn.style.borderColor = 'transparent'; });
+    removeBtn.addEventListener('mouseleave', () => { removeBtn.style.background = 'transparent'; removeBtn.style.color = T.textMuted; removeBtn.style.borderColor = T.border; });
+    removeBtn.addEventListener('click', () => {
+      // Snapshot first — removing the wrapper is a structural change worth undoing.
+      snapshotForUndo();
+      wrapper.remove();
+      setDirty(true);
+      closeVideoPopover();
+    });
+
+    positionPopover(popover, wrapper);
+
+    // Defer the outside-click listener to the next tick so the click that
+    // opened the popover doesn't immediately close it.
+    setTimeout(() => {
+      document.addEventListener('mousedown', onVideoDocMouseDown, true);
+    }, 0);
+
+    urlInput.focus();
+    urlInput.select();
+  }
+
+  function onVideoDocMouseDown(e) {
+    if (!activeVideoPopover) return;
+    if (activeVideoPopover.contains(e.target)) return;
+    closeVideoPopover();
+  }
+
+  function closeVideoPopover() {
+    if (activeVideoPopover) {
+      activeVideoPopover.remove();
+      activeVideoPopover = null;
+      document.removeEventListener('mousedown', onVideoDocMouseDown, true);
+    }
+  }
+
   // ─── AI Section Generator ─────────────────────────────────────────────────
 
   function promptAddSection(insertAfterZone) {
@@ -2353,6 +2651,15 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
                line-height:1.55;outline:none;background:#fff;color:${T.primary};
                transition:border-color 0.18s ease, box-shadow 0.18s ease;"
       ></textarea>
+      <div style="margin-top:10px;padding:10px 12px;background:${T.bgAlt};border-radius:${T.radiusSm};
+                  font-size:11.5px;color:${T.textMuted};line-height:1.55;border-left:3px solid ${T.accent2};">
+        <strong style="color:${T.primary};font-weight:600;">Tip:</strong>
+        ask for <strong style="color:${T.primary};font-weight:600;">images</strong>
+        (<em>"a hero photo of a sunrise"</em>) or
+        <strong style="color:${T.primary};font-weight:600;">YouTube videos</strong>
+        (<em>"embed a product demo video"</em>) — after it's generated you can click
+        any image to upload your own or click any video to paste a YouTube URL.
+      </div>
       <p id="__gitqi-ai-error" style="display:none;margin:10px 0 0;font-size:12.5px;color:${T.danger};"></p>
       <div style="display:flex;gap:10px;margin-top:20px;justify-content:flex-end">
         <button id="__gitqi-ai-cancel"
@@ -2484,6 +2791,11 @@ RULES:
 - Include data-zone="{slug}" and data-zone-label="{Human Label}" on the <section>
 - Add data-editable on every user-editable text element (headings, paragraphs, spans, list items)
 - Add data-editable-image on any <img> elements; use src="./assets/placeholder.jpg"
+- For video embeds, use EXACTLY this pattern (the placeholder video is a safe, always-embeddable demo — user will swap it):
+    <div data-editable-video style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:var(--radius);">
+      <iframe src="https://www.youtube.com/embed/M7lc1UVf-VE" title="YouTube video player" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+    </div>
+  Never use <video> tags, other embed providers, or a different wrapper shape — the editor binds to the [data-editable-video] marker.
 - Use semantic, accessible HTML
 - If the section needs layout, responsive columns, or media queries, put that CSS in the section-css block
 - Return your response in EXACTLY this format with no other text:
@@ -2581,6 +2893,9 @@ RULES:
     // Remove internal binding markers
     clone.querySelectorAll('img[data-gitqi-bound]').forEach(img => {
       img.removeAttribute('data-gitqi-bound');
+    });
+    clone.querySelectorAll('[data-gitqi-video-bound]').forEach(v => {
+      v.removeAttribute('data-gitqi-video-bound');
     });
     const navClone = clone.querySelector('nav[data-gitqi-nav-bound]');
     if (navClone) navClone.removeAttribute('data-gitqi-nav-bound');

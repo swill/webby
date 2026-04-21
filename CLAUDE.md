@@ -100,6 +100,7 @@ Responsible for identifying and activating editable regions.
 | `data-zone-label` | Human-readable label shown in the delete confirmation |
 | `data-editable` | Text node is directly editable via `contenteditable` |
 | `data-editable-image` | Image can be replaced by clicking |
+| `data-editable-video` | `<div>` wrapper around a YouTube `<iframe>` — clicking opens a URL popover that swaps the video |
 
 **Functions:**
 
@@ -109,6 +110,7 @@ activateZones()
   ├── For each: activateZone(section)
   │     ├── Add contenteditable + spellcheck to [data-editable] children
   │     ├── Bind image click handlers on all <img> in zone
+  │     ├── Bind video click handlers on all [data-editable-video] wrappers in zone
   │     ├── Set section.id = section.dataset.zone (for anchor links)
   │     ├── injectDeleteButton(section)    ← hover-visible ✕ button with confirm + snapshotForUndo()
   │     └── injectReformatButton(section)  ← hover-visible ⟳ button → promptReformatSection()
@@ -282,6 +284,95 @@ handleImageUpload(file, imgEl)
   ├── If dirHandle: writeImageToLocalDir(file) → imgEl.src = `./assets/${file.name}`
   └── Else: imgEl.src = blobURL; imgEl.dataset.gitqiSrc = `./assets/${file.name}`
 ```
+
+### 7a. Video Manager
+
+YouTube video embedding, parallel in spirit to the image manager. No upload
+path: videos are external URLs, not assets. Users paste any common YouTube
+URL shape and the editor normalises it to the `/embed/ID` form.
+
+**Canonical markup** (what AI produces, what the editor binds to, what ships
+in published output):
+
+```html
+<div data-editable-video style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:var(--radius);">
+  <iframe src="https://www.youtube.com/embed/M7lc1UVf-VE"
+          title="YouTube video player"
+          style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          referrerpolicy="strict-origin-when-cross-origin"
+          allowfullscreen></iframe>
+</div>
+```
+
+The 56.25% padding-bottom is the standard 16:9 responsive aspect-ratio
+container. Attributes (`title`, `referrerpolicy`, `web-share` in `allow`)
+mirror the embed code YouTube's own Share → Embed dialog currently ships,
+for maximum compatibility. The embed domain is `youtube.com` rather than
+the privacy-enhanced `youtube-nocookie.com` variant because the latter shows
+an unfamiliar domain in the edit popover, which looks sketchy to end users
+editing a site — and in testing it did not resolve YouTube's intermittent
+Error 153 (which is most commonly environmental: ad/content blockers or
+network-level filtering). `extractYouTubeId` still accepts `youtube-nocookie.com`
+URLs if someone pastes one — the parser is domain-agnostic.
+The placeholder video is `M7lc1UVf-VE` — the YouTube Developers talk Google
+uses in the official IFrame Player API documentation, guaranteed embeddable.
+The wrapper `<div>` owns the interaction because iframes swallow pointer
+events — you cannot attach hover or click listeners to the iframe itself.
+
+**Flow:**
+
+1. `activateZone` finds every `[data-editable-video]` wrapper and calls
+   `bindVideoHandler(wrapper)` (idempotent via `data-gitqi-video-bound='1'`).
+2. `bindVideoHandler` injects a transparent absolute-positioned overlay
+   (`data-editor-ui`, `inset:0`, `z-index:10`, `cursor:pointer`) over the
+   iframe. Hover fades in a "Click to change video" pill.
+3. On click, `openVideoPopover(wrapper)` shows a URL popover styled like
+   `openLinkPopover`: URL input, "Go to video →", Apply, Remove video.
+4. Apply parses the input via `extractYouTubeId` (handles `watch?v=`,
+   `youtu.be/`, `/embed/`, `/shorts/`, and bare 11-char IDs). Invalid URLs
+   render an inline error message; valid URLs update `iframe.src` to
+   `https://www.youtube.com/embed/ID` and mark the doc dirty.
+5. Remove video calls `snapshotForUndo()` then removes the wrapper entirely.
+
+```
+bindVideoHandler(wrapper)
+  ├── wrapper.style.position = 'relative' (if static)
+  ├── Inject [data-editor-ui] overlay with hover hint + click handler
+  └── Overlay click → openVideoPopover(wrapper)
+
+openVideoPopover(wrapper)
+  ├── closeVideoPopover() first (one popover at a time)
+  ├── Build popover with URL input, Go-to link, Apply, Remove
+  ├── Apply → extractYouTubeId(url) → iframe.src = embed URL → setDirty(true)
+  ├── Remove → snapshotForUndo() → wrapper.remove() → setDirty(true)
+  ├── positionPopover(popover, wrapper)  ← reuses the link popover positioner
+  └── Defer document mousedown listener to next tick (outside-click close)
+
+closeVideoPopover()
+  └── Remove popover + detach document mousedown listener
+
+extractYouTubeId(url)
+  └── Matches bare id, watch?v=, youtu.be/, /embed/, /shorts/ (all 11-char ids)
+```
+
+**State markers:**
+- `data-gitqi-video-bound='1'` on wrapper — prevents re-binding; stripped by
+  serializer (publish + local) and by `captureSnapshot`.
+- The overlay itself carries `data-editor-ui` so serializer + `captureSnapshot`
+  remove it from saved/published output.
+
+**Undo/redo:** remove-video captures a snapshot before deleting. URL changes
+do not — they're one-attribute updates and the user can just paste the old
+URL back. `restoreSnapshot` calls `closeVideoPopover()` alongside
+`closeLinkPopover()` to drop stale DOM references.
+
+**AI prompts:** `buildSectionPrompt`, `buildReformatPrompt`, and
+`buildPagePrompt` all include the canonical wrapper as an explicit rule.
+`buildReformatPrompt` additionally instructs the model to preserve existing
+`[data-editable-video]` wrappers verbatim (inline styles, iframe, src, all
+attributes) so reformatting doesn't corrupt the marker structure the editor
+binds to.
 
 ### 8. Selection Toolbar
 
@@ -462,7 +553,7 @@ Both modes:
   ├── Clone document.documentElement
   ├── Remove all [data-editor-ui] elements (toolbar, modals, add/delete/reformat buttons)
   ├── Remove contenteditable + spellcheck attributes
-  ├── Remove data-gitqi-bound and data-gitqi-nav-bound attributes
+  ├── Remove data-gitqi-bound, data-gitqi-nav-bound, and data-gitqi-video-bound attributes
   ├── Resolve img[data-gitqi-src]: replace blob URL src with stored relative path
   └── Restore original body padding-top and nav top offset
 

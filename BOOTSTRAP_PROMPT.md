@@ -111,7 +111,12 @@ Generate a single index.html file with the following:
     later from the Theme panel)
 11. All placeholder text should be realistic and relevant to the profession
 12. Placeholder images should use: <img src="./assets/placeholder.jpg" data-editable-image alt="..." />
-13. The overall visual result should be polished, professional, and production-ready
+13. For any video embed, use EXACTLY this wrapper shape (the placeholder video is a safe, always-embeddable demo — the user will swap it via the editor):
+    <div data-editable-video style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:var(--radius);">
+      <iframe src="https://www.youtube.com/embed/M7lc1UVf-VE" title="YouTube video player" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+    </div>
+    Never use <video> tags, other embed providers, or a different wrapper shape — the editor binds to the [data-editable-video] marker and injects a click-intercept overlay on top of the iframe.
+14. The overall visual result should be polished, professional, and production-ready
 
 ---
 
@@ -222,7 +227,12 @@ Generate one HTML file per page, plus a gitqi-pages.json manifest. Requirements 
 10. Set a unique, descriptive <title> and <meta name="description"> for each page
 11. All placeholder text should be realistic and relevant to the profession
 12. Placeholder images: <img src="./assets/placeholder.jpg" data-editable-image alt="..." />
-13. The overall visual result should be polished, professional, and production-ready
+13. For any video embed, use EXACTLY this wrapper shape (the placeholder video is a safe, always-embeddable demo — the user will swap it via the editor):
+    <div data-editable-video style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:var(--radius);">
+      <iframe src="https://www.youtube.com/embed/M7lc1UVf-VE" title="YouTube video player" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+    </div>
+    Never use <video> tags, other embed providers, or a different wrapper shape — the editor binds to the [data-editable-video] marker and injects a click-intercept overlay on top of the iframe.
+14. The overall visual result should be polished, professional, and production-ready
 
 ---
 
