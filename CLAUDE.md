@@ -208,8 +208,10 @@ Also triggered immediately (not via auto-save timer) after: Reformat Nav, Add Pa
 
 **Synced** (page-to-page, whole-site):
 - `<nav>`
+- `<footer>` (falling back to `[data-zone="footer"]`) — content + structure copied verbatim; no active-marker retargeting since footers don't typically have per-page "current" state
 - Main `<style>` (CSS variables + base styles — whatever the theme editor writes to)
 - `<style id="__gitqi-nav-styles">` (nav-specific CSS)
+- `<style id="__gitqi-section-{footerSlug}-styles">` — the footer's per-section style block, when the footer has `data-zone`
 - `<link rel="icon">` and `<link rel="apple-touch-icon">` (favicon)
 - Google Fonts `<link>`s matching `fonts.googleapis.com` or `fonts.gstatic.com` (including preconnects)
 
@@ -220,15 +222,26 @@ Also triggered immediately (not via auto-save timer) after: Reformat Nav, Add Pa
 getNavHTML()
   └── Clone nav → strip [data-editor-ui] + data-gitqi-nav-bound → return outerHTML
 
+getFooterElement(root)
+  └── root.querySelector('footer') || root.querySelector('[data-zone="footer"]')
+
+getFooterHTML()
+  └── Clone footer → strip [data-editor-ui] + contenteditable + spellcheck
+      + data-gitqi-bound + data-gitqi-video-bound → return outerHTML
+
+getFooterSectionStyle(root)
+  └── <style id="__gitqi-section-{footerSlug}-styles"> when footer has data-zone, else null
+
 getMainStyleElement(root)
   └── First <style> in head whose id isn't a __gitqi-* managed id
 
 getSharedHeadElements()
-  └── { mainStyle, navStyle, favicon, appleIcon, googleFontLinks }
+  └── { mainStyle, navStyle, footerStyle, favicon, appleIcon, googleFontLinks }
 
 getSharedSnapshot()
-  └── JSON.stringify({ nav, mainStyle.text, navStyle.text, favicon.outerHTML,
-                        appleIcon.outerHTML, googleFontLinks (sorted) })
+  └── JSON.stringify({ nav, footer, footerSlug, mainStyle.text, navStyle.text,
+                        footerStyle.text, favicon.outerHTML, appleIcon.outerHTML,
+                        googleFontLinks (sorted) })
 
 syncSharedToOtherPagesIfChanged()
   ├── snapshot = getSharedSnapshot()
@@ -238,6 +251,8 @@ syncSharedToOtherPagesIfChanged()
         ├── Read page file from dirHandle → DOMParser
         ├── Replace <nav> → retargetActiveMarker(newNav, activeMarker, page.file)  ← per-page "current link" styling
         ├── Replace main <style> textContent (insert if missing)
+        ├── Replace <footer> (or [data-zone="footer"]) if source has one  ← copied verbatim, no marker retarget
+        ├── Upsert/remove <style id="__gitqi-section-{footerSlug}-styles"> (keyed on source's footer slug)
         ├── Upsert/remove <style id="__gitqi-nav-styles">
         ├── syncLinkRelInDoc(doc, 'icon', …) + apple-touch-icon
         ├── syncGoogleFontLinksInDoc(doc, googleFontLinks)  ← clears old, inserts fresh copies before first <style>

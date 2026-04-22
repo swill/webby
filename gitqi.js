@@ -591,8 +591,9 @@
   // the nav, and compare against the last synced version. If anything changed,
   // we push the updated shared elements into every other local page file.
   //
-  // Synced: <nav>, main <style> (CSS variables + base styles),
-  //   <style id="__gitqi-nav-styles">, <link rel="icon">,
+  // Synced: <nav>, <footer> (or [data-zone="footer"]), main <style> (CSS
+  //   variables + base styles), <style id="__gitqi-nav-styles">, the footer's
+  //   <style id="__gitqi-section-{footerSlug}-styles"> block, <link rel="icon">,
   //   <link rel="apple-touch-icon">, Google Fonts <link>s and their preconnects.
   // NOT synced: <title>, <meta name="description">, <meta name="keywords"> —
   //   these are intentionally page-specific.
@@ -604,6 +605,34 @@
     clone.querySelectorAll('[data-editor-ui]').forEach(n => n.remove());
     clone.removeAttribute('data-gitqi-nav-bound');
     return clone.outerHTML;
+  }
+
+  // The footer is the semantic <footer>, falling back to [data-zone="footer"]
+  // for sites that structure it as a regular section.
+  function getFooterElement(root) {
+    root = root || document;
+    return root.querySelector('footer') || root.querySelector('[data-zone="footer"]');
+  }
+
+  function getFooterHTML() {
+    const footer = getFooterElement();
+    if (!footer) return '';
+    const clone = footer.cloneNode(true);
+    // Strip everything runtime so the disk copy matches what a clean save would write.
+    clone.querySelectorAll('[data-editor-ui]').forEach(n => n.remove());
+    clone.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
+    clone.querySelectorAll('[spellcheck]').forEach(n => n.removeAttribute('spellcheck'));
+    clone.querySelectorAll('[data-gitqi-bound]').forEach(n => n.removeAttribute('data-gitqi-bound'));
+    clone.querySelectorAll('[data-gitqi-video-bound]').forEach(n => n.removeAttribute('data-gitqi-video-bound'));
+    return clone.outerHTML;
+  }
+
+  function getFooterSectionStyle(root) {
+    root = root || document;
+    const footer = getFooterElement(root);
+    const slug = footer && footer.dataset ? footer.dataset.zone : '';
+    if (!slug) return null;
+    return root.getElementById('__gitqi-section-' + slug + '-styles');
   }
 
   // The main <style> block is the first <style> that isn't one of GitQi's
@@ -619,6 +648,7 @@
     return {
       mainStyle: getMainStyleElement(document),
       navStyle:  head.querySelector('style#__gitqi-nav-styles'),
+      footerStyle: getFooterSectionStyle(),
       favicon:   head.querySelector('link[rel="icon"]'),
       appleIcon: head.querySelector('link[rel="apple-touch-icon"]'),
       googleFontLinks: Array.from(head.querySelectorAll(
@@ -629,10 +659,14 @@
 
   function getSharedSnapshot() {
     const s = getSharedHeadElements();
+    const footer = getFooterElement();
     return JSON.stringify({
       nav:       getNavHTML(),
+      footer:    getFooterHTML(),
+      footerSlug: footer && footer.dataset ? (footer.dataset.zone || '') : '',
       mainStyle: s.mainStyle ? s.mainStyle.textContent : '',
       navStyle:  s.navStyle  ? s.navStyle.textContent  : '',
+      footerStyle: s.footerStyle ? s.footerStyle.textContent : '',
       favicon:   s.favicon   ? s.favicon.outerHTML     : '',
       appleIcon: s.appleIcon ? s.appleIcon.outerHTML   : '',
       googleFontLinks: s.googleFontLinks.map(l => l.outerHTML).sort(),
@@ -695,6 +729,9 @@
 
     const shared = getSharedHeadElements();
     const currentNavHTML = getNavHTML();
+    const currentFooterHTML = getFooterHTML();
+    const sourceFooterEl = getFooterElement();
+    const sourceFooterSlug = sourceFooterEl && sourceFooterEl.dataset ? (sourceFooterEl.dataset.zone || '') : '';
     const sourceNav = document.querySelector('nav');
     const activeMarker = sourceNav ? extractActiveMarker(sourceNav, CURRENT_FILENAME) : null;
 
@@ -736,6 +773,38 @@
             const s = doc.createElement('style');
             s.textContent = shared.mainStyle.textContent;
             doc.head.appendChild(s);
+          }
+        }
+
+        // Replace <footer> — matched the same way as the source (semantic
+        // <footer> first, [data-zone="footer"] fallback). Copied verbatim;
+        // footers don't carry per-page "active link" markers the way navs do.
+        if (currentFooterHTML) {
+          const existingFooter = getFooterElement(doc);
+          if (existingFooter) {
+            const tmp = doc.createElement('div');
+            tmp.innerHTML = currentFooterHTML;
+            const newFooter = tmp.firstElementChild;
+            if (newFooter) existingFooter.replaceWith(newFooter);
+          }
+        }
+
+        // Replace the footer's per-section style block, keyed by the source
+        // footer's zone slug.
+        if (sourceFooterSlug) {
+          const destFooterStyleId = '__gitqi-section-' + sourceFooterSlug + '-styles';
+          const destFooterStyleEl = doc.getElementById(destFooterStyleId);
+          if (shared.footerStyle) {
+            if (destFooterStyleEl) {
+              destFooterStyleEl.textContent = shared.footerStyle.textContent;
+            } else {
+              const s = doc.createElement('style');
+              s.id = destFooterStyleId;
+              s.textContent = shared.footerStyle.textContent;
+              doc.head.appendChild(s);
+            }
+          } else if (destFooterStyleEl) {
+            destFooterStyleEl.remove();
           }
         }
 
