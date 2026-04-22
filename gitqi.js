@@ -132,7 +132,7 @@
 
     // Little gradient "W" mark — echoes the site nav logo
     const logo = el('span', { 'data-editor-ui': '' });
-    logo.textContent = 'W';
+    logo.textContent = '气';
     css(logo, {
       width: '26px', height: '26px',
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
