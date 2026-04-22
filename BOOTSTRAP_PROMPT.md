@@ -116,7 +116,13 @@ Generate a single index.html file with the following:
       <iframe src="https://www.youtube.com/embed/M7lc1UVf-VE" title="YouTube video player" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
     </div>
     Never use <video> tags, other embed providers, or a different wrapper shape — the editor binds to the [data-editable-video] marker and injects a click-intercept overlay on top of the iframe.
-14. The overall visual result should be polished, professional, and production-ready
+14. The site footer must be a first-class zone so it is reformatable by the editor. Use either
+    <footer data-zone="footer" data-zone-label="Footer"> or
+    <section data-zone="footer" data-zone-label="Footer">,
+    with data-editable on every user-editable text element inside (copyright line, contact text,
+    social link labels, etc.). The editor syncs footer content across all pages — treat it as
+    site-wide, not page-specific.
+15. The overall visual result should be polished, professional, and production-ready
 
 ---
 
@@ -232,7 +238,14 @@ Generate one HTML file per page, plus a gitqi-pages.json manifest. Requirements 
       <iframe src="https://www.youtube.com/embed/M7lc1UVf-VE" title="YouTube video player" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
     </div>
     Never use <video> tags, other embed providers, or a different wrapper shape — the editor binds to the [data-editable-video] marker and injects a click-intercept overlay on top of the iframe.
-14. The overall visual result should be polished, professional, and production-ready
+14. The site footer must be a first-class zone so it is reformatable by the editor, and must be
+    IDENTICAL in every page. Use either
+    <footer data-zone="footer" data-zone-label="Footer"> or
+    <section data-zone="footer" data-zone-label="Footer">,
+    with data-editable on every user-editable text element inside (copyright line, contact text,
+    social link labels, etc.). The editor syncs footer content across all pages — edits made on
+    any page propagate to all others automatically.
+15. The overall visual result should be polished, professional, and production-ready
 
 ---
 
