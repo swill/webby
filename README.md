@@ -66,6 +66,8 @@ Go to [aistudio.google.com](https://aistudio.google.com), sign in with any Googl
 
 > If you get prompted to enable billing, you're in the wrong place — step back from Google Cloud Console to AI Studio itself.
 
+> **If AI actions fail with "model is busy" or "quota exceeded":** GitQi auto-fallbacks across Gemini models (2.5 Flash → 2.5 Pro → 2.0 Flash → Flash latest → 2.5 Flash Lite) on retryable errors. Each model has its own independent quota on AI Studio, so a daily-limit hit on one doesn't block the others. You'll see a status message when a fallback kicks in. If _all_ models fail in one request, the error dialog exposes a **Retry with model** dropdown so you can pin a specific one.
+
 ### 5. Create `secrets.js`
 
 In the same folder as your `index.html`, create a plain-text file named `secrets.js`:
@@ -138,6 +140,8 @@ GitHub shows a banner: _"Your site is live at https://your-username.github.io/yo
 **Navigation** — hover the nav → **⟳ Reformat Nav** (AI restructure). Changes sync to every other page automatically.
 
 **Pages** _(multi-page sites)_ — click **Pages** in the toolbar. Navigate between pages, generate a new AI page, or delete a page. New page links are added to the nav and propagated to every page.
+
+**AI model fallback** — all four AI actions (Add Section, Reformat, Reformat Nav, Add Page) route through a fallback chain of Gemini models. If the primary is overloaded or rate-limited, GitQi automatically retries on the next one and shows a status like _"Using Gemini 2.5 Pro — primary model was busy"_. On total failure the error dialog offers a **Retry with model** dropdown so you can force a specific model.
 
 **Theme** — click **Theme** for live controls over:
 

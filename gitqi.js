@@ -5666,6 +5666,13 @@ RULES:
     urlInput.value     = link.getAttribute('href') || '';
     blankCheck.checked = link.getAttribute('target') === '_blank';
 
+    // Auto-check "Open in new tab" for external URLs the user types/pastes,
+    // until they manually toggle the checkbox in this session.
+    let blankUserToggled = false;
+    function isExternalUrl(url) {
+      return /^https?:\/\//i.test(String(url).trim());
+    }
+
     // Show / update the "Go to link" button whenever the URL is non-empty
     function refreshGotoBtn() {
       const href = urlInput.value.trim();
@@ -5745,9 +5752,15 @@ RULES:
     urlInput.addEventListener('input', () => {
       link.setAttribute('href', urlInput.value);
       refreshGotoBtn();
+      if (!blankUserToggled && isExternalUrl(urlInput.value) && !blankCheck.checked) {
+        blankCheck.checked = true;
+        link.setAttribute('target', '_blank');
+        link.setAttribute('rel', 'noopener noreferrer');
+      }
       setDirty(true);
     });
     blankCheck.addEventListener('change', () => {
+      blankUserToggled = true;
       if (blankCheck.checked) {
         link.setAttribute('target', '_blank');
         link.setAttribute('rel', 'noopener noreferrer');
