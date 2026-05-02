@@ -915,8 +915,21 @@
     });
     // Ensure the section has an id matching its zone slug so anchor links work when deployed
     if (section.dataset.zone && !section.id) section.id = section.dataset.zone;
-    injectDeleteButton(section);
+    // Duplicate + move arrows are only meaningful for ordinary sections —
+    // the footer is unique per page and is replicated across pages by the
+    // shared sync, so duplicating it or moving it would produce broken state.
+    // Append order matches left-to-right visual order in the flex wrapper:
+    // Duplicate | Reformat | Delete.
+    if (!isFooterSection(section)) {
+      injectDuplicateButton(section);
+      injectMoveButtons(section);
+    }
     injectReformatButton(section);
+    injectDeleteButton(section);
+  }
+
+  function isFooterSection(section) {
+    return section === getFooterElement();
   }
 
   function deactivateZones() {
@@ -1151,14 +1164,44 @@
     });
   }
 
-  function injectDeleteButton(section) {
-    const btn = el('button', { 'data-editor-ui': '' });
-    btn.textContent = '✕ Delete Section';
-    css(btn, {
+  // Shared right-side controls wrapper. Each section gets one flex container
+  // (created on demand) that holds the Duplicate / Reformat / Delete buttons.
+  // Using a flex container instead of three independently-positioned absolute
+  // buttons keeps spacing consistent regardless of button width.
+  function getOrCreateRightControls(section) {
+    let wrap = section.querySelector(':scope > [data-gitqi-section-controls="right"]');
+    if (wrap) return wrap;
+    wrap = el('div', { 'data-editor-ui': '', 'data-gitqi-section-controls': 'right' });
+    css(wrap, {
       position: 'absolute',
       top: '60px',
       right: '10px',
       zIndex: '1000',
+      display: 'flex',
+      gap: '6px',
+      opacity: '0',
+      transition: 'opacity 0.18s ease',
+      pointerEvents: 'none',
+    });
+    section.addEventListener('mouseenter', () => {
+      wrap.style.opacity = '1';
+      wrap.style.pointerEvents = 'auto';
+    });
+    section.addEventListener('mouseleave', () => {
+      wrap.style.opacity = '0';
+      wrap.style.pointerEvents = 'none';
+    });
+    if (getComputedStyle(section).position === 'static') {
+      section.style.position = 'relative';
+    }
+    section.appendChild(wrap);
+    return wrap;
+  }
+
+  function injectDeleteButton(section) {
+    const btn = el('button', { 'data-editor-ui': '' });
+    btn.textContent = '✕ Delete Section';
+    css(btn, {
       padding: '5px 12px',
       background: T.accent4,
       color: '#fff',
@@ -1170,18 +1213,7 @@
       fontWeight: '600',
       letterSpacing: '-0.005em',
       boxShadow: '0 6px 14px -6px rgba(244, 114, 182, 0.55)',
-      opacity: '0',
-      transition: 'opacity 0.18s ease, transform 0.18s ease, background 0.18s ease',
-      pointerEvents: 'none',
-    });
-
-    section.addEventListener('mouseenter', () => {
-      btn.style.opacity = '1';
-      btn.style.pointerEvents = 'auto';
-    });
-    section.addEventListener('mouseleave', () => {
-      btn.style.opacity = '0';
-      btn.style.pointerEvents = 'none';
+      transition: 'transform 0.18s ease, background 0.18s ease',
     });
 
     // Highlight the section outline while hovering the delete button
@@ -1224,20 +1256,13 @@
       });
     });
 
-    if (getComputedStyle(section).position === 'static') {
-      section.style.position = 'relative';
-    }
-    section.appendChild(btn);
+    getOrCreateRightControls(section).appendChild(btn);
   }
 
   function injectReformatButton(section) {
     const btn = el('button', { 'data-editor-ui': '' });
     btn.textContent = '⟳ Reformat';
     css(btn, {
-      position: 'absolute',
-      top: '60px',
-      right: '160px',
-      zIndex: '1000',
       padding: '5px 12px',
       background: T.secondary,
       color: '#fff',
@@ -1249,18 +1274,7 @@
       fontWeight: '600',
       letterSpacing: '-0.005em',
       boxShadow: '0 6px 14px -6px rgba(217, 70, 239, 0.5)',
-      opacity: '0',
-      transition: 'opacity 0.18s ease, transform 0.18s ease',
-      pointerEvents: 'none',
-    });
-
-    section.addEventListener('mouseenter', () => {
-      btn.style.opacity = '1';
-      btn.style.pointerEvents = 'auto';
-    });
-    section.addEventListener('mouseleave', () => {
-      btn.style.opacity = '0';
-      btn.style.pointerEvents = 'none';
+      transition: 'transform 0.18s ease',
     });
 
     // Highlight the section outline while hovering the reformat button
@@ -1280,7 +1294,229 @@
       promptReformatSection(section);
     });
 
-    section.appendChild(btn);
+    getOrCreateRightControls(section).appendChild(btn);
+  }
+
+  function injectDuplicateButton(section) {
+    const btn = el('button', { 'data-editor-ui': '' });
+    btn.textContent = '⧉ Duplicate';
+    css(btn, {
+      padding: '5px 12px',
+      background: T.accent2,
+      color: '#fff',
+      border: 'none',
+      borderRadius: T.radiusPill,
+      cursor: 'pointer',
+      fontSize: '11px',
+      fontFamily: T.fontBody,
+      fontWeight: '600',
+      letterSpacing: '-0.005em',
+      boxShadow: '0 6px 14px -6px rgba(45, 212, 191, 0.5)',
+      transition: 'transform 0.18s ease',
+    });
+
+    btn.addEventListener('mouseenter', () => {
+      section.style.outline = `2px dashed ${T.accent2}`;
+      section.style.outlineOffset = '-2px';
+      btn.style.transform = 'translateY(-1px)';
+    });
+    btn.addEventListener('mouseleave', () => {
+      section.style.outline = '';
+      section.style.outlineOffset = '';
+      btn.style.transform = 'translateY(0)';
+    });
+
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      duplicateSection(section);
+    });
+
+    getOrCreateRightControls(section).appendChild(btn);
+  }
+
+  // Duplicates a section, generating a unique zone slug + id and cloning the
+  // per-section style block (with textual slug rewrites in the CSS) so the
+  // copy gets the same styling as the original. This is fragile by design —
+  // CSS rewriting is regex-based — but the AI-generated CSS uses predictable
+  // patterns ([data-zone="slug"] and #slug), so it covers the common cases.
+  // If something subtle breaks, a Reformat on the new section will fix it.
+  function duplicateSection(section) {
+    snapshotForUndo();
+    const oldSlug = section.dataset.zone || '';
+    const newSlug = oldSlug ? generateUniqueZoneSlug(oldSlug) : '';
+
+    const clone = section.cloneNode(true);
+    // Strip runtime markers and editor-injected children before re-activating.
+    clone.querySelectorAll('[data-editor-ui]').forEach(n => n.remove());
+    clone.querySelectorAll('[data-gitqi-bound]').forEach(n => n.removeAttribute('data-gitqi-bound'));
+    clone.querySelectorAll('[data-gitqi-video-bound]').forEach(n => n.removeAttribute('data-gitqi-video-bound'));
+    clone.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
+    clone.querySelectorAll('[spellcheck]').forEach(n => n.removeAttribute('spellcheck'));
+    // Clear inline styles set by hover-highlight (outline) that may have stuck.
+    clone.style.outline = '';
+    clone.style.outlineOffset = '';
+    // Drop any duplicate IDs on descendants — keeping them would create
+    // collisions across the two sections. The section's own id is reset below.
+    clone.querySelectorAll('[id]').forEach(n => n.removeAttribute('id'));
+
+    if (newSlug) {
+      clone.setAttribute('data-zone', newSlug);
+      clone.setAttribute('id', newSlug);
+    } else {
+      clone.removeAttribute('id');
+    }
+
+    // Clone the per-section style block under the new id, rewriting slug refs.
+    if (oldSlug && newSlug) {
+      const oldStyle = document.getElementById('__gitqi-section-' + oldSlug + '-styles');
+      if (oldStyle) {
+        const newStyle = document.createElement('style');
+        newStyle.id = '__gitqi-section-' + newSlug + '-styles';
+        newStyle.textContent = rewriteSectionCssSlug(oldStyle.textContent, oldSlug, newSlug);
+        oldStyle.after(newStyle);
+      }
+    }
+
+    // Insert the clone after the original (and after its trailing add-button if any).
+    const next = section.nextElementSibling;
+    if (next && next.classList.contains('__gitqi-add-wrap')) {
+      next.after(clone);
+    } else {
+      section.after(clone);
+    }
+
+    activateZone(clone);
+    refreshAddButtons();
+    setDirty(true);
+  }
+
+  function generateUniqueZoneSlug(baseSlug) {
+    // If the base already has a -N suffix, increment from there; otherwise
+    // start at -2. Either way, walk forward until we find a free slot.
+    const match = baseSlug.match(/^(.*?)(?:-(\d+))?$/);
+    const stem = match[1];
+    let n = match[2] ? parseInt(match[2], 10) + 1 : 2;
+    while (document.querySelector('[data-zone="' + stem + '-' + n + '"]')) n++;
+    return stem + '-' + n;
+  }
+
+  // Up/down arrows on the left side of the section, mirroring the right-side
+  // controls. Reorders within the parent's [data-zone] sections, skipping the
+  // footer so it stays anchored at the bottom. Nav is naturally excluded —
+  // the nav element doesn't carry data-zone in any AI-generated layout.
+  function injectMoveButtons(section) {
+    const wrap = el('div', { 'data-editor-ui': '' });
+    css(wrap, {
+      position: 'absolute',
+      top: '60px',
+      left: '10px',
+      zIndex: '1000',
+      display: 'flex',
+      gap: '6px',
+      opacity: '0',
+      transition: 'opacity 0.18s ease',
+      pointerEvents: 'none',
+    });
+
+    const styleArrow = (b) => {
+      css(b, {
+        width: '34px', height: '28px',
+        padding: '0',
+        background: T.primary,
+        color: '#fff',
+        border: `1px solid ${T.accent4}`,
+        borderRadius: T.radiusPill,
+        cursor: 'pointer',
+        fontSize: '14px',
+        fontFamily: T.fontBody,
+        fontWeight: '600',
+        boxShadow: '0 6px 14px -6px rgba(26, 27, 58, 0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'transform 0.18s ease, background 0.18s ease',
+      });
+    };
+
+    const upBtn   = el('button', { 'data-editor-ui': '', title: 'Move section up' });
+    const downBtn = el('button', { 'data-editor-ui': '', title: 'Move section down' });
+    upBtn.innerHTML   = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>`;
+    downBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+    styleArrow(upBtn);
+    styleArrow(downBtn);
+
+    section.addEventListener('mouseenter', () => {
+      wrap.style.opacity = '1';
+      wrap.style.pointerEvents = 'auto';
+    });
+    section.addEventListener('mouseleave', () => {
+      wrap.style.opacity = '0';
+      wrap.style.pointerEvents = 'none';
+    });
+
+    [upBtn, downBtn].forEach(b => {
+      b.addEventListener('mouseenter', () => {
+        section.style.outline = `2px dashed ${T.primary}`;
+        section.style.outlineOffset = '-2px';
+        b.style.transform = 'translateY(-1px)';
+        b.style.background = T.secondary;
+      });
+      b.addEventListener('mouseleave', () => {
+        section.style.outline = '';
+        section.style.outlineOffset = '';
+        b.style.transform = 'translateY(0)';
+        b.style.background = T.primary;
+      });
+    });
+
+    upBtn.addEventListener('click', e => { e.stopPropagation(); moveSection(section, -1); });
+    downBtn.addEventListener('click', e => { e.stopPropagation(); moveSection(section,  1); });
+
+    wrap.appendChild(upBtn);
+    wrap.appendChild(downBtn);
+    section.appendChild(wrap);
+  }
+
+  function moveSection(section, direction) {
+    const parent = section.parentNode;
+    if (!parent) return;
+    // Reorder within siblings that are themselves [data-zone] sections, with
+    // the footer pinned in place. Add-button wrappers and other layout chrome
+    // are stepped over implicitly because we move relative to other sections.
+    const footer = getFooterElement();
+    const moveable = Array.from(parent.children).filter(c =>
+      c.matches('[data-zone]') && c !== footer
+    );
+    const idx = moveable.indexOf(section);
+    if (idx === -1) return;
+    let target;
+    if (direction === -1) {
+      if (idx === 0) return;
+      target = moveable[idx - 1];
+      snapshotForUndo();
+      parent.insertBefore(section, target);
+    } else {
+      if (idx >= moveable.length - 1) return;
+      target = moveable[idx + 1];
+      snapshotForUndo();
+      target.after(section);
+    }
+    refreshAddButtons();
+    setDirty(true);
+    // Scroll the moved section into view so the user can confirm the change
+    // when the move would have taken it off-screen.
+    section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function rewriteSectionCssSlug(cssText, oldSlug, newSlug) {
+    if (!cssText) return '';
+    const escaped = oldSlug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Replace [data-zone="oldSlug"] (single or double quoted) and #oldSlug at
+    // word boundaries. Class names containing the slug as a fragment (e.g.
+    // .hero-card) are not rewritten — too risky, and the duplicate sharing
+    // those styles is usually the desired behavior.
+    return cssText
+      .replace(new RegExp('\\[data-zone\\s*=\\s*"' + escaped + '"\\]', 'g'), '[data-zone="' + newSlug + '"]')
+      .replace(new RegExp("\\[data-zone\\s*=\\s*'" + escaped + "'\\]", 'g'), "[data-zone='" + newSlug + "']")
+      .replace(new RegExp('#' + escaped + '(?![A-Za-z0-9_-])', 'g'), '#' + newSlug);
   }
 
   function promptReformatSection(section) {
@@ -2793,7 +3029,7 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
     overlay.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
-      openVideoPopover(wrapper);
+      openVideoPopover(wrapper, { x: e.clientX, y: e.clientY });
     });
 
     wrapper.appendChild(overlay);
@@ -2827,7 +3063,7 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
     }
   }
 
-  function openVideoPopover(wrapper) {
+  function openVideoPopover(wrapper, clickPoint) {
     closeVideoPopover();
 
     const iframe = wrapper.querySelector('iframe');
@@ -2967,7 +3203,11 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
       closeVideoPopover();
     });
 
-    positionPopover(popover, wrapper);
+    if (clickPoint && Number.isFinite(clickPoint.x) && Number.isFinite(clickPoint.y)) {
+      positionPopoverAtPoint(popover, clickPoint.x, clickPoint.y);
+    } else {
+      positionPopover(popover, wrapper);
+    }
 
     // Defer the outside-click listener to the next tick so the click that
     // opened the popover doesn't immediately close it.
@@ -3444,6 +3684,92 @@ RULES:
     setDirty(true);
   }
 
+  // ─── Email obfuscation (publish-time only) ────────────────────────────────
+  //
+  // mailto: addresses in published HTML are easy targets for spam crawlers
+  // that scrape pages for `@`-shaped strings. We replace each <a href="mailto:…">
+  // with a JS-decoded reveal: the href is replaced with javascript:void(0),
+  // the original mailto URL goes into a base64-of-reversed payload, and a
+  // tiny inline script runs at load to wire real hrefs back up. Any visible
+  // email text inside the link is replaced with an empty placeholder span
+  // that the same script fills in. HTML-entity-only encoding was rejected as
+  // the sole approach because every modern scraper already decodes entities.
+  // No <noscript> fallback is emitted by design — exposing the email there
+  // defeats the protection.
+
+  function gqEncode(s) {
+    // base64 of UTF-8-safe reversed string. The reverse step is just an
+    // extra obstacle to naïve atob() decoders; with it, regex scrapers
+    // looking for "user@domain" inside a base64 blob don't find it because
+    // the address is reversed before encoding.
+    const reversed = String(s).split('').reverse().join('');
+    return btoa(unescape(encodeURIComponent(reversed)));
+  }
+
+  function obfuscateMailtoLinks(root) {
+    let touched = false;
+    root.querySelectorAll('a[href]').forEach(a => {
+      const href = a.getAttribute('href') || '';
+      if (!/^\s*mailto:/i.test(href)) return;
+
+      a.setAttribute('data-gqe', gqEncode(href.trim()));
+      a.setAttribute('href', 'javascript:void(0)');
+
+      // If the visible text of the link contains the address itself, replace
+      // those occurrences with empty placeholder spans the decoder will fill.
+      const address = href.trim().replace(/^mailto:/i, '').split('?')[0];
+      if (address) obfuscateEmailInTextNodes(a, address);
+      touched = true;
+    });
+    if (touched) injectMailtoDecoderScript(root);
+  }
+
+  function obfuscateEmailInTextNodes(linkEl, email) {
+    // Use the link's owner document everywhere — publishSite calls this on
+    // pages parsed via DOMParser, which produces nodes in a separate document
+    // that can't accept nodes created by the main document.
+    const ownerDoc = linkEl.ownerDocument || document;
+    const lower = email.toLowerCase();
+    const walker = ownerDoc.createTreeWalker(linkEl, NodeFilter.SHOW_TEXT, null);
+    const targets = [];
+    let n;
+    while ((n = walker.nextNode())) {
+      if (n.nodeValue && n.nodeValue.toLowerCase().includes(lower)) targets.push(n);
+    }
+    targets.forEach(textNode => {
+      const text = textNode.nodeValue;
+      const idx = text.toLowerCase().indexOf(lower);
+      if (idx === -1) return;
+      // Preserve original casing of the matched span — users sometimes write
+      // emails as "Foo@Bar.com" for readability and that should round-trip.
+      const before = text.slice(0, idx);
+      const match  = text.slice(idx, idx + email.length);
+      const after  = text.slice(idx + email.length);
+      const span = ownerDoc.createElement('span');
+      span.setAttribute('data-gqt', gqEncode(match));
+      const frag = ownerDoc.createDocumentFragment();
+      if (before) frag.appendChild(ownerDoc.createTextNode(before));
+      frag.appendChild(span);
+      if (after) frag.appendChild(ownerDoc.createTextNode(after));
+      textNode.parentNode.replaceChild(frag, textNode);
+    });
+  }
+
+  function injectMailtoDecoderScript(root) {
+    const body = root.querySelector('body') || root;
+    if (!body || body.querySelector('script[data-gqe-decoder]')) return;
+    const ownerDoc = body.ownerDocument || document;
+    const script = ownerDoc.createElement('script');
+    script.setAttribute('data-gqe-decoder', '');
+    // Tight, minified-by-hand decoder. The decode mirror of gqEncode:
+    //   atob(payload) → escaped-UTF8 string → unescape via decodeURIComponent(escape(...)) → reverse
+    script.textContent =
+      "(function(){var d=function(s){try{return decodeURIComponent(escape(atob(s))).split('').reverse().join('')}catch(e){return ''}};" +
+      "document.querySelectorAll('a[data-gqe]').forEach(function(a){a.setAttribute('href',d(a.getAttribute('data-gqe')));a.removeAttribute('data-gqe')});" +
+      "document.querySelectorAll('[data-gqt]').forEach(function(s){s.textContent=d(s.getAttribute('data-gqt'));s.removeAttribute('data-gqt')});})();";
+    body.appendChild(script);
+  }
+
   // ─── Serializer / Exporter ────────────────────────────────────────────────
 
   // serialize({ local: false }) — for publish/export: strips secrets.js + gitqi.js so
@@ -3495,6 +3821,10 @@ RULES:
       clone.querySelectorAll(`span[${GITQI_STYLE_ATTR}]`).forEach(s => {
         s.removeAttribute(GITQI_STYLE_ATTR);
       });
+      // Obfuscate any mailto: links so spam crawlers don't pick up plain
+      // addresses from the published HTML. Edits stay readable in the editor —
+      // this only runs at publish/export.
+      obfuscateMailtoLinks(clone);
     }
 
     // Restore original body padding
@@ -3638,6 +3968,8 @@ RULES:
               const src = s.getAttribute('src') || '';
               if (src.includes('secrets.js') || src.includes('gitqi.js') || src.includes('webby.js')) s.remove();
             });
+            doc.querySelectorAll(`span[${GITQI_STYLE_ATTR}]`).forEach(s => s.removeAttribute(GITQI_STYLE_ATTR));
+            obfuscateMailtoLinks(doc);
             const stripped = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
             const pageSha  = await github.getFileSHA(page.file);
             await github.putFile(page.file, stripped, pageSha);
@@ -5282,7 +5614,7 @@ RULES:
     linkBtn.title = 'Link';
 
     // Color button — opens a flyout with theme colors and a custom picker
-    const COLOR_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 5 12a7 7 0 1 0 14 0z"/></svg>`;
+    const COLOR_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 11-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.8.8 2 .8 2.8 0L19 11Z"/><path d="m5 2 5 5"/><path d="M2 13h15"/><path d="M22 20a2 2 0 1 1-4 0c0-1.6 1.7-2.4 2-4 .3 1.6 2 2.4 2 4Z"/></svg>`;
     const colorBtn = makeSelBtn('', false, () => {
       toggleFlyout(flyout, 'color', () => populateColorFlyout(flyout, savedRange));
     });
@@ -5324,27 +5656,29 @@ RULES:
       flyout.style.display = 'none';
       flyout.dataset.mode = '';
       flyout.innerHTML = '';
-      repositionSelectionToolbar();
+      clampSelectionToolbarInViewport();
       return;
     }
     flyout.innerHTML = '';
     flyout.dataset.mode = mode;
     flyout.style.display = 'block';
     populate();
-    repositionSelectionToolbar();
+    clampSelectionToolbarInViewport();
   }
 
-  function repositionSelectionToolbar() {
+  // Once the toolbar is up, the row position should not move out from under
+  // the user's cursor when they open a flyout — opening a flyout grows the
+  // toolbar downward, and re-pinning it to the selection would yank the row
+  // upward. So we only nudge the toolbar if growing it pushed it off-screen.
+  function clampSelectionToolbarInViewport() {
     if (!selectionToolbar) return;
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
-    const rect = sel.getRangeAt(0).getBoundingClientRect();
-    if (!rect.width && !rect.height) return;
-    const bRect = selectionToolbar.getBoundingClientRect();
-    let top  = rect.top  - bRect.height - 8;
-    let left = rect.left + rect.width / 2 - bRect.width / 2;
-    if (top < 8) top = rect.bottom + 8;
-    left = Math.max(8, Math.min(window.innerWidth - bRect.width - 8, left));
+    const r = selectionToolbar.getBoundingClientRect();
+    let top = parseFloat(selectionToolbar.style.top) || r.top;
+    let left = parseFloat(selectionToolbar.style.left) || r.left;
+    if (r.bottom > window.innerHeight - 8) top -= (r.bottom - (window.innerHeight - 8));
+    if (top < 8) top = 8;
+    if (left + r.width > window.innerWidth - 8) left = window.innerWidth - r.width - 8;
+    if (left < 8) left = 8;
     css(selectionToolbar, { top: top + 'px', left: left + 'px' });
   }
 
@@ -5529,7 +5863,7 @@ RULES:
       // outside the toolbar) triggers onSelectionChange and rebuilds the toolbar.
       customBtn.addEventListener('mousedown', e => {
         e.preventDefault();
-        setTimeout(() => { renderCustom(); repositionSelectionToolbar(); }, 0);
+        setTimeout(() => { renderCustom(); clampSelectionToolbarInViewport(); }, 0);
       });
       grid.appendChild(customBtn);
 
@@ -5653,7 +5987,7 @@ RULES:
       applyBtn.addEventListener('mousedown', e => { e.preventDefault(); tryApply(); });
       backBtn.addEventListener('mousedown', e => {
         e.preventDefault();
-        setTimeout(() => { renderSwatches(); repositionSelectionToolbar(); }, 0);
+        setTimeout(() => { renderSwatches(); clampSelectionToolbarInViewport(); }, 0);
       });
 
       panel.append(pickerRow, hexRow, btnRow);
@@ -5886,6 +6220,35 @@ RULES:
     openLinkPopover(link);
   }
 
+  // Parse a mailto: URL into its parts. Lenient by design — partial / malformed
+  // URLs (e.g. just "mailto:" while the user is typing) still return empty
+  // strings rather than throwing, so the popover stays interactive.
+  function parseMailto(url) {
+    const result = { address: '', subject: '', body: '' };
+    if (!isMailtoUrl(url)) return result;
+    const stripped = String(url).trim().replace(/^mailto:/i, '');
+    const qIdx = stripped.indexOf('?');
+    result.address = qIdx === -1 ? stripped : stripped.slice(0, qIdx);
+    if (qIdx !== -1) {
+      const params = new URLSearchParams(stripped.slice(qIdx + 1));
+      result.subject = params.get('subject') || '';
+      result.body    = params.get('body')    || '';
+    }
+    return result;
+  }
+  function isMailtoUrl(url) {
+    return /^mailto:/i.test(String(url).trim());
+  }
+  function buildMailto({ address, subject, body }) {
+    let url = 'mailto:' + (address || '');
+    const params = new URLSearchParams();
+    if (subject) params.set('subject', subject);
+    if (body)    params.set('body',    body);
+    const qs = params.toString();
+    if (qs) url += '?' + qs;
+    return url;
+  }
+
   function openLinkPopover(link) {
     closeLinkPopover();
 
@@ -5929,6 +6292,21 @@ RULES:
                  font-size:12.5px;box-sizing:border-box;font-family:${T.fontMono};background:#fff;color:${T.primary};outline:none;transition:border-color 0.15s;" />
       </label>
 
+      <div id="__gitqi-link-mailto" style="display:none;margin-bottom:12px;padding:10px 12px;background:${T.bgAlt};border-radius:${T.radiusSm};border-left:3px solid ${T.secondary};">
+        <label style="display:block;margin-bottom:8px;">
+          <span style="display:block;font-size:11px;font-weight:600;color:${T.primary};margin-bottom:5px;letter-spacing:0.04em;text-transform:uppercase;">Subject</span>
+          <input id="__gitqi-link-subject" type="text" value=""
+            style="width:100%;padding:6px 10px;border:1.5px solid ${T.border};border-radius:${T.radiusSm};
+                   font-size:12.5px;box-sizing:border-box;font-family:${T.fontBody};background:#fff;color:${T.primary};outline:none;transition:border-color 0.15s;" />
+        </label>
+        <label style="display:block;margin:0;">
+          <span style="display:block;font-size:11px;font-weight:600;color:${T.primary};margin-bottom:5px;letter-spacing:0.04em;text-transform:uppercase;">Body</span>
+          <textarea id="__gitqi-link-body" rows="3"
+            style="width:100%;padding:6px 10px;border:1.5px solid ${T.border};border-radius:${T.radiusSm};
+                   font-size:12.5px;box-sizing:border-box;font-family:${T.fontBody};background:#fff;color:${T.primary};outline:none;resize:vertical;transition:border-color 0.15s;line-height:1.5;"></textarea>
+        </label>
+      </div>
+
       <div id="__gitqi-link-picker-wrap" style="margin-bottom:12px;">
         <select id="__gitqi-link-picker"
           style="width:100%;padding:7px 10px;border:1.5px solid ${T.border};border-radius:${T.radiusSm};
@@ -5963,11 +6341,14 @@ RULES:
     activeLinkPopover = popover;
 
     // Populate fields
-    const textInput  = popover.querySelector('#__gitqi-link-text');
-    const urlInput   = popover.querySelector('#__gitqi-link-url');
-    const blankCheck = popover.querySelector('#__gitqi-link-blank');
-    const gotoBtn    = popover.querySelector('#__gitqi-link-goto');
-    const picker     = popover.querySelector('#__gitqi-link-picker');
+    const textInput    = popover.querySelector('#__gitqi-link-text');
+    const urlInput     = popover.querySelector('#__gitqi-link-url');
+    const blankCheck   = popover.querySelector('#__gitqi-link-blank');
+    const gotoBtn      = popover.querySelector('#__gitqi-link-goto');
+    const picker       = popover.querySelector('#__gitqi-link-picker');
+    const mailtoBlock  = popover.querySelector('#__gitqi-link-mailto');
+    const subjectInput = popover.querySelector('#__gitqi-link-subject');
+    const bodyInput    = popover.querySelector('#__gitqi-link-body');
 
     textInput.value    = link.textContent;
     urlInput.value     = link.getAttribute('href') || '';
@@ -5980,17 +6361,58 @@ RULES:
       return /^https?:\/\//i.test(String(url).trim());
     }
 
-    // Show / update the "Go to link" button whenever the URL is non-empty
+    // Mailto block visibility + parsing. Whenever the URL changes, parse
+    // subject/body out of the query and reflect them in the inputs. The
+    // inputs themselves write back to the URL on edit (see below) — using a
+    // suppression flag to avoid the URL→inputs→URL feedback loop.
+    //
+    // In mailto mode the page picker and "Open in new tab" toggle are hidden:
+    // jumping to a page or opening the OS mail client in a new browser tab
+    // are both irrelevant when the click is going to launch a mail client.
+    // We also clear any stale target="_blank" / rel that might have been set
+    // on this <a> when its URL was something else.
+    const pickerWrap = popover.querySelector('#__gitqi-link-picker-wrap');
+    const blankLabel = blankCheck.closest('label');
+    let suppressUrlSync = false;
+    function syncMailtoFromUrl() {
+      const isMail = isMailtoUrl(urlInput.value);
+      const wasVisible = mailtoBlock.style.display !== 'none';
+      mailtoBlock.style.display = isMail ? '' : 'none';
+      if (pickerWrap && pagesInventory) pickerWrap.style.display = isMail ? 'none' : '';
+      if (blankLabel) blankLabel.style.display = isMail ? 'none' : '';
+      if (isMail) {
+        const parsed = parseMailto(urlInput.value);
+        if (subjectInput.value !== parsed.subject) subjectInput.value = parsed.subject;
+        if (bodyInput.value    !== parsed.body)    bodyInput.value    = parsed.body;
+        if (link.getAttribute('target') === '_blank') {
+          link.removeAttribute('target');
+          link.removeAttribute('rel');
+          blankCheck.checked = false;
+        }
+      }
+      if (wasVisible !== isMail) reclampPopoverAfterResize(popover);
+    }
+
+    // Show / update the "Go to link" button whenever the URL is non-empty.
+    // For mailto: URLs the button is relabelled "Test email →" — clicking it
+    // fires the same window.location = mailto behavior the published page
+    // will use, so the user can verify subject/body land in their mail client.
     function refreshGotoBtn() {
       const href = urlInput.value.trim();
-      if (href && href !== '#') {
+      if (!href || href === '#') { gotoBtn.style.display = 'none'; return; }
+      gotoBtn.style.display = '';
+      if (isMailtoUrl(href)) {
+        gotoBtn.textContent = 'Test email →';
         gotoBtn.href = href;
-        gotoBtn.style.display = '';
+        gotoBtn.target = '_self';
       } else {
-        gotoBtn.style.display = 'none';
+        gotoBtn.textContent = 'Go to link →';
+        gotoBtn.href = href;
+        gotoBtn.target = '_self';
       }
     }
     refreshGotoBtn();
+    syncMailtoFromUrl();
 
     // Populate page picker from inventory (current page zones immediately; other pages async)
     if (pagesInventory) {
@@ -6059,6 +6481,7 @@ RULES:
     urlInput.addEventListener('input', () => {
       link.setAttribute('href', urlInput.value);
       refreshGotoBtn();
+      if (!suppressUrlSync) syncMailtoFromUrl();
       if (!blankUserToggled && isExternalUrl(urlInput.value) && !blankCheck.checked) {
         blankCheck.checked = true;
         link.setAttribute('target', '_blank');
@@ -6066,6 +6489,22 @@ RULES:
       }
       setDirty(true);
     });
+    function rebuildMailtoUrl() {
+      const parsed = parseMailto(urlInput.value);
+      const next = buildMailto({
+        address: parsed.address,
+        subject: subjectInput.value,
+        body:    bodyInput.value,
+      });
+      suppressUrlSync = true;
+      urlInput.value = next;
+      suppressUrlSync = false;
+      link.setAttribute('href', next);
+      refreshGotoBtn();
+      setDirty(true);
+    }
+    subjectInput.addEventListener('input', rebuildMailtoUrl);
+    bodyInput.addEventListener('input', rebuildMailtoUrl);
     blankCheck.addEventListener('change', () => {
       blankUserToggled = true;
       if (blankCheck.checked) {
@@ -6079,7 +6518,7 @@ RULES:
     });
 
     // Focus rings on inputs
-    [textInput, urlInput].forEach(inp => {
+    [textInput, urlInput, subjectInput, bodyInput].forEach(inp => {
       inp.addEventListener('focus', () => { inp.style.borderColor = T.secondary; inp.style.boxShadow = '0 0 0 3px rgba(217, 70, 239, 0.12)'; });
       inp.addEventListener('blur',  () => { inp.style.borderColor = T.border; inp.style.boxShadow = 'none'; });
     });
@@ -6116,22 +6555,77 @@ RULES:
     }
   }
 
+  // Positions a popover relative to an anchor element. The popover is
+  // expected to be already in the DOM so its rendered size can be measured —
+  // an approximate guess (the old approach) reliably mis-flipped tall popovers
+  // when they actually exceeded the guess. With a real measurement we can
+  // pick the side with more room and clamp into viewport precisely.
   function positionPopover(popover, anchor) {
     const rect = anchor.getBoundingClientRect();
     const margin = 8;
-    const popH = 330; // approximate height before render (taller with page picker)
-    const popW = 320;
+    const pRect = popover.getBoundingClientRect();
+    const popH = pRect.height || 330;
+    const popW = pRect.width  || 320;
 
-    let top = rect.bottom + margin;
-    let left = rect.left;
+    const spaceBelow = window.innerHeight - rect.bottom - margin;
+    const spaceAbove = rect.top - margin;
 
-    // Flip above if not enough space below
-    if (top + popH > window.innerHeight - margin) {
+    let top;
+    if (spaceBelow >= popH || spaceBelow >= spaceAbove) {
+      top = rect.bottom + margin;
+    } else {
       top = rect.top - popH - margin;
     }
-    // Clamp horizontally
+
+    let left = rect.left;
+    if (left + popW > window.innerWidth - margin) left = window.innerWidth - popW - margin;
+    if (left < margin) left = margin;
+    if (top + popH > window.innerHeight - margin) top = window.innerHeight - popH - margin;
+    if (top < margin) top = margin;
+
+    css(popover, { top: top + 'px', left: left + 'px' });
+  }
+
+  // Positions a popover near a click point (used by the video popover so it
+  // appears under the cursor instead of pinned to the wrapper, which can be
+  // off-screen for large videos). Falls back to the standard clamp logic.
+  function positionPopoverAtPoint(popover, x, y) {
+    const margin = 8;
+    const pRect = popover.getBoundingClientRect();
+    const popH = pRect.height || 330;
+    const popW = pRect.width  || 360;
+
+    let left = x - popW / 2;
+    let top  = y + 12;
+
+    if (top + popH > window.innerHeight - margin) top = y - popH - 12;
+    if (top < margin) top = margin;
+    if (top + popH > window.innerHeight - margin) top = window.innerHeight - popH - margin;
+
+    if (left + popW > window.innerWidth - margin) left = window.innerWidth - popW - margin;
+    if (left < margin) left = margin;
+
+    css(popover, { top: top + 'px', left: left + 'px' });
+  }
+
+  // Re-clamp an already-positioned popover after its size changed (e.g. mailto
+  // fields appeared). Anchors to the popover's current top-left, then prefers
+  // the direction with more room: if there's more space above the original
+  // anchor than below, we let the popover grow upward; otherwise downward.
+  function reclampPopoverAfterResize(popover) {
+    const margin = 8;
+    const pRect = popover.getBoundingClientRect();
+    const popH = pRect.height;
+    const popW = pRect.width;
+    let top  = parseFloat(popover.style.top)  || pRect.top;
+    let left = parseFloat(popover.style.left) || pRect.left;
+
+    if (top + popH > window.innerHeight - margin) {
+      top = Math.max(margin, window.innerHeight - popH - margin);
+    }
+    if (top < margin) top = margin;
     if (left + popW > window.innerWidth - margin) {
-      left = window.innerWidth - popW - margin;
+      left = Math.max(margin, window.innerWidth - popW - margin);
     }
     if (left < margin) left = margin;
 

@@ -43,27 +43,7 @@ GitHub Pages is configured to serve from the root of the `main` branch ("Deploy 
 
 ## The Editor Script (`gitqi.js`)
 
-Hosted externally on GitHub Pages. Included in each HTML page only during local editing — stripped from the published output.
-
-### Initialization
-
-```
-init()  [async]
-  ├── injectToolbar()
-  ├── activateZones()
-  ├── activateNav()
-  ├── bindMutationObserver()
-  ├── bindLinkHandlers()
-  ├── bindSelectionToolbar()
-  ├── bindUndoRedo()
-  └── initFileAccess()  [async]
-        ├── Load FileSystemDirectoryHandle from IndexedDB
-        │     (migrates v1.0.x per-page keys → per-directory keys automatically)
-        ├── If found + permission granted → dirHandle = stored (silent)
-        │     └── loadPagesInventory()
-        └── Else → showAccessBanner()
-  └── lastSyncedSharedSnapshot = getSharedSnapshot()  ← baseline for shared head + nav change detection
-```
+Single self-invoking IIFE, hosted externally on GitHub Pages. Included in each HTML page only during local editing — stripped from the published output.
 
 ### Required Globals (set by `secrets.js`)
 
@@ -75,6 +55,16 @@ window.SITE_SECRETS = {
   branch:      "main"       // Deployment branch
 };
 ```
+
+### Initialization
+
+`init()` runs once at DOMContentLoaded:
+
+1. `loadGoogleFontsManifest()` — install cached manifest synchronously; background-fetch fresh
+2. `injectToolbar()` → `migrateLegacyWebbyMarkers()` → `activateZones()` → `activateNav()`
+3. Bind: mutation observer, link handlers, selection toolbar, undo/redo
+4. `initFileAccess()` — re-link the site folder if a handle is in IndexedDB; otherwise show the folder-picker banner
+5. `lastSyncedSharedSnapshot = getSharedSnapshot()` — baseline so the first auto-save doesn't spuriously sync
 
 ### Key Constants
 
@@ -90,9 +80,9 @@ const HANDLE_KEY = 'dir:' + location.href.substring(0, location.href.lastIndexOf
 
 ### 1. Zone Manager
 
-Responsible for identifying and activating editable regions.
+Identifies and activates editable regions.
 
-**Data attributes used in HTML:**
+**Data attributes:**
 
 | Attribute | Purpose |
 |---|---|
@@ -102,413 +92,148 @@ Responsible for identifying and activating editable regions.
 | `data-editable-image` | Image can be replaced by clicking |
 | `data-editable-video` | `<div>` wrapper around a YouTube `<iframe>` — clicking opens a URL popover that swaps the video |
 
-**Functions:**
+`activateZones()` queries `[data-zone]`, calls `activateZone(section)` for each, then injects "+ Add Section" buttons between zones. `activateZone` makes `[data-editable]` children contenteditable, binds image and video handlers, sets the section's `id` from its `data-zone` slug, and injects the section controls (see below).
 
-```
-activateZones()
-  ├── Query all [data-zone] elements
-  ├── For each: activateZone(section)
-  │     ├── Add contenteditable + spellcheck to [data-editable] children
-  │     ├── Bind image click handlers on all <img> in zone
-  │     ├── Bind video click handlers on all [data-editable-video] wrappers in zone
-  │     ├── Set section.id = section.dataset.zone (for anchor links)
-  │     ├── injectDeleteButton(section)    ← hover-visible ✕ button with confirm + snapshotForUndo()
-  │     └── injectReformatButton(section)  ← hover-visible ⟳ button → promptReformatSection()
-  └── injectAddSectionButtons()
-        └── Insert "Add Section" button before first zone and after each zone
+**Section controls** — hover-revealed buttons added by `activateZone`:
 
-deactivateZones()
-  ├── Remove all contenteditable + spellcheck attributes
-  └── Remove all [data-editor-ui] injections
-```
+- Right side, in a single right-aligned flex container (`getOrCreateRightControls(section)` for consistent spacing): **⧉ Duplicate**, **⟳ Reformat**, **✕ Delete**.
+- Left side, in their own flex container: **↑ / ↓** move arrows (with a 1px `T.accent4` border so they stand out on dark backgrounds).
+- The footer (whatever `getFooterElement()` matches) is suppressed from Duplicate and the move arrows — it's pinned at the bottom and is replicated across pages by the shared sync, so duplicating or moving it would produce broken state. Reformat and Delete still apply.
+
+**Duplicate** (`duplicateSection`): clones the section, generates a unique zone slug via `generateUniqueZoneSlug` (suffix `-2`, `-3`, … starting from the base or incrementing if already suffixed), drops descendant `id` attributes to avoid collisions, clears runtime markers (`data-editor-ui`, `data-gitqi-bound`, `data-gitqi-video-bound`, `contenteditable`, `spellcheck`), and clones the per-section style block under the new id. CSS is rewritten textually via `rewriteSectionCssSlug` for `[data-zone="…"]` and `#…` references — fragile by design (regex-on-CSS doesn't understand `:where()`, attribute-substring matchers, or class names that happen to embed the slug). When something subtle breaks, a Reformat on the new section fixes it.
+
+**Move** (`moveSection`): reorders within sibling `[data-zone]` elements, with the footer pinned in place. Captures undo, scrolls the moved section into view (`block: 'nearest'`), and calls `refreshAddButtons()` to keep "+ Add Section" markers consistent.
 
 ### 2. Toolbar
 
-Fixed-position bar injected at the top of the page in edit mode. Marked `data-editor-ui` so it is stripped on export/publish.
+Fixed-position bar prepended to the page in edit mode. Marked `data-editor-ui` so it's stripped on export/publish.
 
-**Elements (left to right):**
+Left → right: site title with `●` dirty indicator, status message area, **↩ Undo**, **↪ Redo**, **Pages**, **Theme**, **Export** (download clean HTML for the current page), **Publish** (commit all pages + `gitqi-pages.json` to GitHub).
 
-- Site title with `●` dirty indicator (unsaved changes)
-- Spacer
-- Status message area
-- **↩ Undo** button — disabled until undo stack has entries
-- **↪ Redo** button — disabled until redo stack has entries
-- **Pages** button → open/close Pages panel
-- **Theme** button → open/close CSS variable + site identity editor
-- **Export** button → download clean HTML for the current page
-- **Publish** button → commit all pages and gitqi-pages.json to GitHub
-
-**Functions:**
-
-```
-injectToolbar()   ← Create and prepend toolbar; adjust body padding-top;
-                    shift fixed <nav> down by 44px if present
-showStatus(msg)   ← Display temporary status text in toolbar
-setDirty(bool)    ← Toggle ● indicator; schedules auto-save when true
-```
+`injectToolbar()` shifts `body { padding-top }` and any fixed `<nav>`'s `top` down by 44px to make room. `setDirty(bool)` toggles the indicator and schedules a debounced auto-save (1500ms).
 
 ### 3. File Persistence
 
-Keeps HTML files on disk in sync with the current DOM state using the File System Access API. Only Chrome and Edge are supported — opening in any other browser shows a blocking message.
+Keeps HTML files on disk in sync with the live DOM via the File System Access API. Chrome / Edge only — other browsers see a blocking modal.
 
-```
-initFileAccess()
-  ├── Load FileSystemDirectoryHandle from IndexedDB (with v1.0.x key migration)
-  ├── If found: verifyPermission() → if granted, silently re-link → loadPagesInventory()
-  └── If not found or denied: showAccessBanner()
-
-showAccessBanner()
-  └── Banner below toolbar: local path hint + "Select Folder" button
-        └── On click: showDirectoryPicker() → store handle in IndexedDB
-              → writeCurrentPageToLocalFile() → loadPagesInventory()
-
-saveChanges()  ← called by auto-save timer
-  ├── writeCurrentPageToLocalFile()
-  └── syncSharedToOtherPagesIfChanged()
-
-scheduleAutoSave()  ← debounced 1500ms; triggered by setDirty(true)
-  └── saveChanges()
-
-writeCurrentPageToLocalFile()
-  └── serialize({ local: true }) → write CURRENT_FILENAME to dirHandle
-
-writePageToLocalFile(filename, content)
-  └── Write any page file (used by page generator and shared sync)
-
-writeImageToLocalDir(file)
-  └── Write to assets/ subdirectory in the linked folder
-```
-
-The `local: true` flag on `serialize()` preserves the `secrets.js` and `gitqi.js` script tags so edit mode activates correctly on the next open. The default `local: false` strips them for the deployed site.
+- `initFileAccess()`: load `FileSystemDirectoryHandle` from IndexedDB (with v1.0.x per-page → per-directory key migration), verify permission, silently re-link or show the folder banner.
+- `saveChanges()` (auto-save): `writeCurrentPageToLocalFile()` then `syncSharedToOtherPagesIfChanged()`.
+- `serialize({ local: true })` keeps the `secrets.js` and `gitqi.js` script tags so edit mode activates on next open. `local: false` strips them for published output.
+- Image upload: `writeImageToLocalDir(file)` writes to `assets/` and the serializer resolves any `data-gitqi-src` blob-URL placeholders back to relative paths on publish.
 
 ### 4. Pages Inventory
 
-Tracks all pages in a `gitqi-pages.json` manifest alongside the HTML files. Auto-created on first use; auto-upgraded for existing single-page sites.
+`gitqi-pages.json` alongside the HTML files:
 
-```js
-// Structure
+```json
 { "pages": [{ "file": "index.html", "title": "Home", "navLabel": "Home" }, ...] }
 ```
 
-```
-loadPagesInventory()
-  ├── Try to read gitqi-pages.json from dirHandle
-  ├── If found: parse + ensure CURRENT_FILENAME is registered
-  └── If not found: seed from current page → savePagesInventory()
-
-savePagesInventory()
-  └── Write gitqi-pages.json to dirHandle
-```
+Auto-created on first use. `loadPagesInventory()` reads it (seeding from the current page if missing) and ensures `CURRENT_FILENAME` is registered.
 
 ### 5. Shared Head + Nav Sync
 
-On every auto-save, compares a JSON snapshot of the current page's shared head elements plus the nav against the snapshot from the last sync. If anything changed, the updated elements are written into every other page file on disk.
-
-Also triggered immediately (not via auto-save timer) after: Reformat Nav, Add Page, Delete Page.
+On every auto-save, compares a JSON snapshot of the current page's shared head + nav against the last-synced snapshot. If anything changed, the updated elements are written into every other page file on disk. Triggered immediately (not via the auto-save timer) after Reformat Nav, Add Page, and Delete Page (those callers reset `lastSyncedSharedSnapshot = ''` and call the sync directly).
 
 **Synced** (page-to-page, whole-site):
 - `<nav>`
-- `<footer>` (falling back to `[data-zone="footer"]`) — content + structure copied verbatim; no active-marker retargeting since footers don't typically have per-page "current" state
-- Main `<style>` (CSS variables + base styles — whatever the theme editor writes to)
+- `<footer>` (falling back to `[data-zone="footer"]`) — copied verbatim; no active-marker retargeting since footers don't typically have per-page "current" state. **A bare `<footer>` (no `data-zone`, no `data-editable`) gets synced too, but doesn't get the section controls** because those bind through `activateZone()` which only runs on `[data-zone]` elements.
+- Main `<style>` (CSS variables + base styles, edited via the Theme panel)
 - `<style id="__gitqi-nav-styles">` (nav-specific CSS)
 - `<style id="__gitqi-section-{footerSlug}-styles">` — the footer's per-section style block, when the footer has `data-zone`
 - `<link rel="icon">` and `<link rel="apple-touch-icon">` (favicon)
 - Google Fonts `<link>`s matching `fonts.googleapis.com` or `fonts.gstatic.com` (including preconnects)
 
-**NOT synced** (intentionally page-specific):
-- `<title>`, `<meta name="description">`, `<meta name="keywords">`
+**NOT synced** (intentionally page-specific): `<title>`, `<meta name="description">`, `<meta name="keywords">`.
 
-```
-getNavHTML()
-  └── Clone nav → strip [data-editor-ui] + data-gitqi-nav-bound → return outerHTML
-
-getFooterElement(root)
-  └── root.querySelector('footer') || root.querySelector('[data-zone="footer"]')
-
-getFooterHTML()
-  └── Clone footer → strip [data-editor-ui] + contenteditable + spellcheck
-      + data-gitqi-bound + data-gitqi-video-bound → return outerHTML
-
-getFooterSectionStyle(root)
-  └── <style id="__gitqi-section-{footerSlug}-styles"> when footer has data-zone, else null
-
-getMainStyleElement(root)
-  └── First <style> in head whose id isn't a __gitqi-* managed id
-
-getSharedHeadElements()
-  └── { mainStyle, navStyle, footerStyle, favicon, appleIcon, googleFontLinks }
-
-getSharedSnapshot()
-  └── JSON.stringify({ nav, footer, footerSlug, mainStyle.text, navStyle.text,
-                        footerStyle.text, favicon.outerHTML, appleIcon.outerHTML,
-                        googleFontLinks (sorted) })
-
-syncSharedToOtherPagesIfChanged()
-  ├── snapshot = getSharedSnapshot()
-  ├── if snapshot === lastSyncedSharedSnapshot → return (no-op)
-  ├── activeMarker = extractActiveMarker(sourceNav, CURRENT_FILENAME)  ← { classes, ariaCurrent } or null
-  └── For each page in pagesInventory (skip current):
-        ├── Read page file from dirHandle → DOMParser
-        ├── Replace <nav> → retargetActiveMarker(newNav, activeMarker, page.file)  ← per-page "current link" styling
-        ├── Replace main <style> textContent (insert if missing)
-        ├── Replace <footer> (or [data-zone="footer"]) if source has one  ← copied verbatim, no marker retarget
-        ├── Upsert/remove <style id="__gitqi-section-{footerSlug}-styles"> (keyed on source's footer slug)
-        ├── Upsert/remove <style id="__gitqi-nav-styles">
-        ├── syncLinkRelInDoc(doc, 'icon', …) + apple-touch-icon
-        ├── syncGoogleFontLinksInDoc(doc, googleFontLinks)  ← clears old, inserts fresh copies before first <style>
-        └── Write back
-  └── lastSyncedSharedSnapshot = snapshot
-```
-
-**Active-link retargeting** — the sync copies the source nav verbatim but then rewrites the "current page" marker for each destination. Without this, every synced page would end up with the source page's link highlighted as active.
-
-Recognised markers (`ACTIVE_CLASS_CANDIDATES`): CSS classes `active`, `current`, `is-active`, `is-current`, `selected`, and the `aria-current` attribute. `extractActiveMarker()` reads whichever are present on the anchor(s) matching `CURRENT_FILENAME`; `retargetActiveMarker()` strips all of them from the cloned nav and re-applies them to anchors whose `href` matches the destination page.
+**Active-link retargeting** — the sync copies the source nav verbatim but rewrites the "current page" marker for each destination. Recognised markers (`ACTIVE_CLASS_CANDIDATES`): CSS classes `active`, `current`, `is-active`, `is-current`, `selected`, plus the `aria-current` attribute. `extractActiveMarker()` reads whichever are present on the source's anchor matching `CURRENT_FILENAME`; `retargetActiveMarker()` strips them all from the cloned nav and re-applies them to anchors whose `href` matches the destination page.
 
 ### 6. Mutation Observer
 
-Tracks content changes for dirty-state management and auto-save triggering.
-
-```
-bindMutationObserver()
-  ├── Disconnect any existing observer first (safe to call repeatedly, e.g. after undo/redo)
-  ├── Observe subtree of <body> for characterData + childList
-  ├── Ignore mutations originating from [data-editor-ui] elements
-  └── On relevant change → setDirty(true) → scheduleAutoSave()
-```
+Subtree observer on `<body>` for `characterData` + `childList`. Mutations originating from `[data-editor-ui]` are ignored. Anything else triggers `setDirty(true)` → debounced auto-save. Disconnected and re-bound on undo/redo (and any other mass DOM replacement) to avoid spurious snapshots.
 
 ### 7. Image Manager
 
-Handles image replacement without leaving the browser.
+`bindImageHandler(img)` paints a translucent white haze sized to the image's bounding box (re-measured on `mouseenter` so it stays correct as responsive layouts flow) plus a "Click to replace image" hint pill. Clicking opens a hidden file input.
 
-**Flow:**
-
-1. User clicks an `<img>` element inside a zone (hover shows "Click to replace image" overlay)
-2. Hidden `<input type="file">` triggers file picker
-3. On file select:
-   - Read as ArrayBuffer → base64 encode
-   - Upload to `assets/` in GitHub repo via API
-   - **If folder is linked:** write file to local `assets/`; set `src` to `./assets/filename`
-   - **If no folder access:** display via blob URL locally; store `./assets/filename` in `data-gitqi-src`; serializer resolves on publish/export
-
-On hover the editor paints a translucent white haze sized to the image's bounding box (not the parent, which may be larger) and shows the "Click to replace image" pill on top. The haze is re-measured at `mouseenter` time so it stays correct as responsive layouts flow.
-
-```
-bindImageHandler(img)
-  └── Attach white-haze overlay + hint pill + click → file picker → handleImageUpload()
-
-handleImageUpload(file, imgEl)
-  ├── Read as ArrayBuffer → base64Encode → github.uploadFile(`assets/${file.name}`)
-  ├── If dirHandle: writeImageToLocalDir(file) → imgEl.src = `./assets/${file.name}`
-  └── Else: imgEl.src = blobURL; imgEl.dataset.gitqiSrc = `./assets/${file.name}`
-```
+`handleImageUpload(file, imgEl)`:
+- Read as ArrayBuffer → base64 → `github.uploadFile('assets/' + file.name)`
+- If `dirHandle`: also `writeImageToLocalDir(file)`; set `imgEl.src = './assets/' + file.name`
+- If no folder access: display via `URL.createObjectURL(file)`; store `'./assets/' + file.name` in `data-gitqi-src` for the serializer to resolve at publish time
 
 ### 7a. Video Manager
 
-YouTube video embedding, parallel in spirit to the image manager. No upload
-path: videos are external URLs, not assets. Users paste any common YouTube
-URL shape and the editor normalises it to the `/embed/ID` form.
+YouTube embedding. No upload path — videos are external URLs. Users paste any common YouTube URL (`watch?v=`, `youtu.be/`, `/embed/`, `/shorts/`, or bare 11-char id) and `extractYouTubeId` normalises it to `/embed/ID`.
 
-**Canonical markup** (what AI produces, what the editor binds to, what ships
-in published output):
-
-```html
-<div data-editable-video style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:var(--radius);">
-  <iframe src="https://www.youtube.com/embed/M7lc1UVf-VE"
-          title="YouTube video player"
-          style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-          referrerpolicy="strict-origin-when-cross-origin"
-          allowfullscreen></iframe>
-</div>
-```
-
-The 56.25% padding-bottom is the standard 16:9 responsive aspect-ratio
-container. Attributes (`title`, `referrerpolicy`, `web-share` in `allow`)
-mirror the embed code YouTube's own Share → Embed dialog currently ships,
-for maximum compatibility. The embed domain is `youtube.com` rather than
-the privacy-enhanced `youtube-nocookie.com` variant because the latter shows
-an unfamiliar domain in the edit popover, which looks sketchy to end users
-editing a site — and in testing it did not resolve YouTube's intermittent
-Error 153 (which is most commonly environmental: ad/content blockers or
-network-level filtering). `extractYouTubeId` still accepts `youtube-nocookie.com`
-URLs if someone pastes one — the parser is domain-agnostic.
-The placeholder video is `M7lc1UVf-VE` — the YouTube Developers talk Google
-uses in the official IFrame Player API documentation, guaranteed embeddable.
-The wrapper `<div>` owns the interaction because iframes swallow pointer
-events — you cannot attach hover or click listeners to the iframe itself.
+**Canonical markup** (what AI produces, what the editor binds to, what ships in published output) — a 16:9 responsive container (`padding-bottom:56.25%`) wrapping an `<iframe src="https://www.youtube.com/embed/{ID}">`. The wrapper `<div data-editable-video>` owns the click interaction because iframes swallow pointer events. The placeholder ID (`M7lc1UVf-VE`) is the YouTube Developers talk Google uses in the official IFrame Player API docs — guaranteed embeddable. The embed domain is `youtube.com` rather than `youtube-nocookie.com` because the latter shows an unfamiliar domain in the edit popover; in testing it didn't resolve YouTube's intermittent Error 153 anyway (which is usually environmental: ad/content blockers or network filtering).
 
 **Flow:**
+1. `activateZone` finds every `[data-editable-video]` wrapper and calls `bindVideoHandler(wrapper)` (idempotent via `data-gitqi-video-bound='1'`).
+2. `bindVideoHandler` injects a transparent overlay (`data-editor-ui`, `inset:0`, `z-index:10`) over the iframe. Hover fades in a "Click to change video" pill. On `file://` it also shows a persistent "Preview only — video plays once published" pill, since YouTube blocks playback on `file://` origins with Error 153.
+3. Overlay click → `openVideoPopover(wrapper, { x, y })`. The popover anchors at the click coordinates (via `positionPopoverAtPoint`) so it stays under the cursor regardless of how big the video is — anchoring to the wrapper itself would push the popover off-screen for fullscreen-width videos.
+4. Apply parses the input via `extractYouTubeId`; valid URLs update `iframe.src` and mark dirty. Remove video calls `snapshotForUndo()` then deletes the wrapper.
 
-1. `activateZone` finds every `[data-editable-video]` wrapper and calls
-   `bindVideoHandler(wrapper)` (idempotent via `data-gitqi-video-bound='1'`).
-2. `bindVideoHandler` injects a transparent absolute-positioned overlay
-   (`data-editor-ui`, `inset:0`, `z-index:10`, `cursor:pointer`) over the
-   iframe. Hover fades in a "Click to change video" pill.
-3. On click, `openVideoPopover(wrapper)` shows a URL popover styled like
-   `openLinkPopover`: URL input, "Go to video →", Apply, Remove video.
-4. Apply parses the input via `extractYouTubeId` (handles `watch?v=`,
-   `youtu.be/`, `/embed/`, `/shorts/`, and bare 11-char IDs). Invalid URLs
-   render an inline error message; valid URLs update `iframe.src` to
-   `https://www.youtube.com/embed/ID` and mark the doc dirty.
-5. Remove video calls `snapshotForUndo()` then removes the wrapper entirely.
+**State markers:** `data-gitqi-video-bound='1'` (stripped by serializer + `captureSnapshot`); the overlay carries `data-editor-ui` (stripped the same way).
 
-```
-bindVideoHandler(wrapper)
-  ├── wrapper.style.position = 'relative' (if static)
-  ├── Inject [data-editor-ui] overlay with white-haze hover tint + hint pill
-  ├── If location.protocol === 'file:': append persistent "Preview only — video
-  │     plays once published" pill (YouTube blocks playback on file:// origins
-  │     with Error 153; the notice reassures the owner the error is expected
-  │     and resolves on publish). Stripped by serializer via data-editor-ui.
-  └── Overlay click → openVideoPopover(wrapper)
-
-openVideoPopover(wrapper)
-  ├── closeVideoPopover() first (one popover at a time)
-  ├── Build popover with URL input, Go-to link, Apply, Remove
-  ├── Apply → extractYouTubeId(url) → iframe.src = embed URL → setDirty(true)
-  ├── Remove → snapshotForUndo() → wrapper.remove() → setDirty(true)
-  ├── positionPopover(popover, wrapper)  ← reuses the link popover positioner
-  └── Defer document mousedown listener to next tick (outside-click close)
-
-closeVideoPopover()
-  └── Remove popover + detach document mousedown listener
-
-extractYouTubeId(url)
-  └── Matches bare id, watch?v=, youtu.be/, /embed/, /shorts/ (all 11-char ids)
-```
-
-**State markers:**
-- `data-gitqi-video-bound='1'` on wrapper — prevents re-binding; stripped by
-  serializer (publish + local) and by `captureSnapshot`.
-- The overlay itself carries `data-editor-ui` so serializer + `captureSnapshot`
-  remove it from saved/published output.
-
-**Undo/redo:** remove-video captures a snapshot before deleting. URL changes
-do not — they're one-attribute updates and the user can just paste the old
-URL back. `restoreSnapshot` calls `closeVideoPopover()` alongside
-`closeLinkPopover()` to drop stale DOM references.
-
-**AI prompts:** `buildSectionPrompt`, `buildReformatPrompt`, and
-`buildPagePrompt` all include the canonical wrapper as an explicit rule.
-`buildReformatPrompt` additionally instructs the model to preserve existing
-`[data-editable-video]` wrappers verbatim (inline styles, iframe, src, all
-attributes) so reformatting doesn't corrupt the marker structure the editor
-binds to.
+**AI prompts:** `buildSectionPrompt`, `buildReformatPrompt`, and `buildPagePrompt` all include the canonical wrapper as an explicit rule. `buildReformatPrompt` additionally instructs the model to preserve existing `[data-editable-video]` wrappers verbatim so reformatting doesn't corrupt the marker structure.
 
 ### 8. Selection Toolbar
 
-Floating toolbar that appears above selected text inside any `[data-editable]` element.
-
-**Buttons:**
+Floating toolbar shown when there's a non-empty selection inside any `[data-editable]` element.
 
 | Button | Action |
 |---|---|
 | **B** | `execCommand('bold')` → normalizes `<b>` → `<strong>` |
 | *I* | `execCommand('italic')` → normalizes `<i>` → `<em>` |
-| 🎨 | Color flyout — theme swatches + custom picker + "Remove color" |
-| Aa | Font flyout — theme font vars + "Clear font styling" |
-| A↕ | Font-size flyout — em-based presets (Smaller 0.75 / Small 0.875 / **Normal** / Large 1.25 / Larger 1.5 / Huge 2). Relative `em` units so a bump inside a heading stays heading-scaled and a bump in body stays body-scaled. "Normal" strips the font-size property instead of writing a redundant `font-size: 1em`. |
+| 🪣 | Color flyout — theme swatches + custom picker + "Remove color" (paint bucket SVG) |
+| Aa | Font flyout — theme font vars + Google Fonts picker + "Clear font styling" |
+| A↕ | Font-size flyout — em-based presets (Smaller 0.75 / Small 0.875 / **Normal** / Large 1.25 / Larger 1.5 / Huge 2). Relative `em` units so a bump inside a heading stays heading-scaled and a bump in body stays body-scaled. "Normal" strips the property instead of writing a redundant `font-size: 1em`. |
 | `</>` | Wrap/unwrap selection in `<code>` |
 | 🔗 | Wrap selection in `<a>` → open link popover |
 
-```
-bindSelectionToolbar()
-  └── Listens for mouseup/keyup; shows toolbar when selection is non-empty inside [data-editable]
+**Sticky positioning** — once the toolbar is up, opening a flyout grows it downward. It does **not** re-pin to the selection (an earlier "smart" reposition yanked the row up and out from under the user's cursor mid-click). `clampSelectionToolbarInViewport()` only nudges the toolbar if growing it pushed it off-screen.
 
-showSelectionToolbar(sel)
-  └── Position above selection (flip below if near top of viewport)
+**Inline-style spans (color / font / font-size)** — every span the toolbar creates carries `data-gitqi-style`. `wrapSelectionInStyledSpan(prop, val)` calls `clearInlineStyleFromSelection(prop, { onlyIfFullyCovered: true })` first so repeated changes to the same property replace rather than nest. Scope is any inline-styled `<span>`, gitqi-owned or hand-authored — the **full-coverage guard** keeps it safe: a property is only stripped from a span if the selection covers ALL of that span's contents, so hand-authored markup that extends beyond the selection is never mutated. Explicit "Remove color" / "Clear font" / "Normal" drop the guard since the user is being explicit.
 
-hideSelectionToolbar()
-  └── Called on mousedown outside toolbar, Escape key, or after button action
-```
-
-**Inline-style spans (color / font / font-size):**
-
-Every span created by the color, font, and font-size flyouts is tagged `data-gitqi-style`.
-`wrapSelectionInStyledSpan(prop, val)` calls
-`clearInlineStyleFromSelection(prop, { onlyIfFullyCovered: true })` first so
-repeated changes to the same property replace rather than nest — no more
-`<span font-A><span font-B><span font-C>…</span></span></span>` trails of
-dead references. Legacy nests authored before the marker existed collapse on
-re-apply for the same reason.
-
-Scope is any inline-styled `<span>`, gitqi-owned or hand-authored. The
-**full-coverage guard** is what keeps this safe: a property is only stripped
-from a span if the selection covers ALL of that span's contents, so
-hand-authored markup that extends beyond the selection is never mutated
-(partial selections still nest — correct, since the outer style still applies
-to the unselected portion). Explicit "Remove color" / "Clear font" /
-"Normal" (font-size) buttons drop the guard since the user is being explicit.
-
-The `data-gitqi-style` marker is stripped in publish output
-(`serialize({local: false})`) but preserved in local saves + snapshots so it
-survives re-opens and undo/redo.
+The `data-gitqi-style` marker is stripped in publish output (`serialize({local: false})`) but preserved in local saves and snapshots so it survives re-opens and undo/redo.
 
 ### 9. Link Editor
 
-Intercepts clicks on `<a>` elements inside `[data-zone]` or `<nav>` and shows a popover editor.
+Intercepts clicks on `<a>` elements inside `[data-zone]` or `<nav>` in the capture phase and shows a popover.
 
 **Popover fields:**
-
 - **Display text** — updates `textContent` live
 - **URL** — updates `href` live
-- **Go to link →** — opens the linked URL (shown when URL is non-empty)
-- **Page/section picker** — dropdown grouped by page; current page zones from DOM, other pages' zones loaded async from disk via `dirHandle`
-- **Open in new tab** — toggles `target="_blank"` + `rel="noopener noreferrer"`
-- **Remove link** — unwraps `<a>` leaving plain text
+- **Go to link →** — opens the URL in the same tab. Relabelled **Test email →** when the URL is `mailto:`.
+- **Subject** + **Body** (mailto only) — collapsible block that appears whenever the URL starts with `mailto:`. `parseMailto(url)` reads existing `?subject=` / `?body=` into the inputs on open; editing either input rebuilds the URL via `buildMailto({address, subject, body})`. A `suppressUrlSync` flag breaks the URL→inputs→URL feedback loop.
+- **Page/section picker** — dropdown grouped by page. Current page's zones from the DOM; other pages' zones loaded async from disk via `dirHandle`.
+- **Open in new tab** — toggles `target="_blank"` + `rel="noopener noreferrer"`. Auto-checks for external `https?://` URLs unless the user has explicitly toggled it in the same session.
+- **Remove link** — unwraps `<a>`, leaving plain text.
 
-```
-bindLinkHandlers()
-  └── document.addEventListener('click', handleLinkClick, true)  ← capture phase
-
-openLinkPopover(link)
-  └── Position near link → populate fields → bind live-update handlers
-
-positionPopover(popover, anchor)
-  └── Place below anchor; flip above if insufficient space below; clamp horizontally
-```
+**Positioning** (`positionPopover` and `reclampPopoverAfterResize`) — measures the actual rendered popover size (the old guess-then-flip approach mis-flipped tall popovers when the guess was wrong), prefers the side with more room, and re-clamps when the popover resizes (e.g. mailto fields appearing/disappearing) without yanking it to a new anchor.
 
 ### 10. Section Reformat
 
-AI-powered layout restructuring for individual sections. Preserves content (text, images, links) while changing structure.
+`promptReformatSection(section)` — modal → on submit → `snapshotForUndo()` → `reformatSection()`:
 
-```
-promptReformatSection(section)  ← triggered by ⟳ hover button on section
-  └── Modal: describe layout change → on submit → snapshotForUndo() → reformatSection()
-
-reformatSection(section, description, { model })
-  ├── buildReformatPrompt() — sends: main style block + section-specific CSS + clean section HTML
-  ├── callGeminiWithFallback(prompt, { model })  ← see §13a
-  ├── parseSectionResponse() — expects <section-css>...</section-css> <section-html>...</section-html>
-  ├── Upsert <style id="__gitqi-section-{slug}-styles"> for the returned CSS
-  └── section.replaceWith(newSection) → activateZone(newSection)
-```
+- `buildReformatPrompt()` sends: main style block, section-specific CSS, clean section HTML, plus rules to preserve content + existing `[data-editable-video]` wrappers verbatim
+- `callGeminiWithFallback(prompt, { model })` (see §13a)
+- `parseSectionResponse()` expects `<section-css>…</section-css>` followed by `<section-html>…</section-html>`
+- Upsert `<style id="__gitqi-section-{slug}-styles">` and replace the section, then `activateZone(newSection)`
 
 ### 11. Nav Editor
 
-AI-powered navigation restructuring. Makes minimal targeted changes; syncs immediately to all other pages.
+`activateNav()` injects the **⟳ Reformat Nav** hover button and marks the nav with `data-gitqi-nav-bound`.
 
-```
-activateNav()
-  └── Injects ⟳ Reformat Nav hover button; marks nav with data-gitqi-nav-bound
+`reformatNav(nav, description, { model })`:
+- `buildReformatNavPrompt()` sends: style block, nav-specific CSS, nav HTML
+- `parseNavResponse()` expects `<nav-html>…</nav-html>` and optionally `<nav-css>…</nav-css>` (AI omits the CSS for content-only changes like adding/removing a link)
+- Replace the nav, `rerunInlineScripts(newNav)` to rebind hamburger toggles, `activateNav()`, then force-sync (`lastSyncedSharedSnapshot = ''` → `syncSharedToOtherPagesIfChanged()`)
 
-promptReformatNav(nav) → snapshotForUndo() → reformatNav(nav, description, { model })
-  ├── buildReformatNavPrompt() — sends: style block + existing nav-specific CSS + nav HTML
-  ├── callGeminiWithFallback(prompt, { model })  ← see §13a
-  ├── parseNavResponse() — expects <nav-html>...</nav-html> + optional <nav-css>...</nav-css>
-  │     (AI omits <nav-css> for content-only changes like adding/removing a link)
-  ├── Upsert <style id="__gitqi-nav-styles"> only if CSS was returned
-  ├── nav.replaceWith(newNav)
-  ├── rerunInlineScripts(newNav)       ← rebinds hamburger toggle listeners on new elements
-  ├── activateNav()
-  └── lastSyncedSharedSnapshot = '' → syncSharedToOtherPagesIfChanged()  ← immediate force-sync
+`addLinkToNav(navEl, label, href)` — programmatic link insertion (used by the page generator). Strategy 1: find every `<ul>`/`<ol>` containing `<li><a>`, clone the last item per list, update text/href, append. Strategy 2 (fallback): bare `<a>` elements, clone the last and insert after.
 
-addLinkToNav(navEl, label, href)  ← programmatic link insertion (used by page generator)
-  ├── Strategy 1: find all <ul>/<ol> with <li><a> → clone last item per list, update, append
-  └── Strategy 2 (fallback): bare <a> elements → clone last, update, insert after
-```
+**Hamburger script pattern** — nav inline scripts should bind to the `<nav>` element (not `document` or `window`) so listeners are cleaned up when the nav is replaced and re-bound when `rerunInlineScripts` re-executes them:
 
-**Hamburger script pattern** — nav inline scripts should bind to the `<nav>` element (not `document` or `window`) so that listeners are cleaned up when the nav is replaced and re-bound when `rerunInlineScripts` re-executes them:
 ```js
 (function() {
   const nav = document.currentScript.closest('nav');
@@ -520,294 +245,126 @@ addLinkToNav(navEl, label, href)  ← programmatic link insertion (used by page 
 
 ### 12. Pages Manager
 
-Multi-page site management. Requires folder access (`dirHandle`).
+Multi-page management. Requires folder access (`dirHandle`).
 
-```
-openPagesPanel()  ← toggled by Pages toolbar button
-  ├── Lists all pages from pagesInventory
-  ├── Open → links to ./{page.file}
-  └── ✕ Delete → confirm → snapshotForUndo() → deletePageFromSite(page)
-
-promptAddPage() / generatePage(description, navLabel, filename, { model })
-  ├── snapshotForUndo()
-  ├── buildPagePrompt() — includes: style block, nav-specific CSS, nav HTML (verbatim),
-  │     example section, container wrapper detection
-  ├── callGeminiWithFallback(prompt, { model })  ← AI generates page; copies nav exactly (link added separately) — see §13a
-  ├── writePageToLocalFile(filename, html)
-  ├── Register in pagesInventory → savePagesInventory()
-  ├── addLinkToNav(currentNav, navLabel, href)  ← programmatic nav update
-  ├── activateNav()
-  └── lastSyncedSharedSnapshot = '' → syncSharedToOtherPagesIfChanged()  ← distributes nav link + shared head to all pages (incl. new file)
-
-deletePageFromSite(page)
-  ├── removePageFromNav(navEl, filename)  ← strip nav links to the deleted page
-  ├── pagesInventory.pages.filter(...)   ← remove from inventory + savePagesInventory()
-  ├── dirHandle.removeEntry(filename)    ← delete local file
-  └── lastSyncedSharedSnapshot = '' → syncSharedToOtherPagesIfChanged()  ← sync cleaned nav to all pages
-```
+- `openPagesPanel()` — toggled by the Pages toolbar button. Lists all pages from `pagesInventory`, with Open and ✕ Delete per page.
+- `promptAddPage` / `generatePage(description, navLabel, filename, { model })`: snapshot, build prompt (style block, nav-specific CSS, nav HTML verbatim, example section), call AI, write to disk, register in inventory, `addLinkToNav` programmatically, `activateNav()`, force-sync to distribute the new link + shared head to all pages including the new file.
+- `deletePageFromSite(page)`: `removePageFromNav` strips nav links pointing to the file, remove from inventory, `dirHandle.removeEntry(filename)`, force-sync to clean nav across all pages.
 
 ### 13. AI Section Generator
 
-Generates a new themed section and injects it at the chosen position.
-
-```
-promptAddSection(insertAfterZone)
-  └── Modal → on submit → snapshotForUndo() → generateSection(description, insertAfterZone)
-
-generateSection(description, insertAfterZone, { model })
-  ├── buildSectionPrompt() — sends: style block + example zone HTML
-  ├── callGeminiWithFallback(prompt, { model }) — see §13a
-  ├── parseSectionResponse() — <section-css> + <section-html>
-  ├── Upsert <style id="__gitqi-section-{slug}-styles"> for CSS
-  └── injectNewSection(section, insertAfterZone) → activateZone(section)
-```
+`promptAddSection(insertAfterZone)` → modal → snapshot → `generateSection`:
+- `buildSectionPrompt()` sends: style block + example zone HTML
+- `callGeminiWithFallback`, `parseSectionResponse`, upsert `<style id="__gitqi-section-{slug}-styles">`, inject the new section, `activateZone()`
 
 ### 13a. Gemini Model Fallback
 
-All four AI flows (Add Section, Reformat Section, Reformat Nav, Add Page)
-route through a single `callGeminiWithFallback(prompt, opts)` helper that
-automatically retries on a different model when the primary is overloaded
-or rate-limited. This was added because real users hit `gemini-2.5-flash`
-overload (HTTP 503) for extended periods and had no way to recover without
-refreshing / switching keys.
+All four AI flows (Add Section, Reformat Section, Reformat Nav, Add Page) route through `callGeminiWithFallback(prompt, opts)` which retries on a different Gemini model when the primary is overloaded (503) or rate-limited (429). Real users hit `gemini-2.5-flash` overload for extended periods and had no recourse without refreshing or switching keys.
 
 **Model chain** (ordered, first is default):
 
 ```
-GEMINI_MODELS = [
-  gemini-2.5-flash,      // default
-  gemini-2.5-pro,        // slower but often available when Flash is saturated
-  gemini-2.0-flash,
-  gemini-flash-latest,
-  gemini-2.5-flash-lite,
-]
+gemini-2.5-flash    // default
+gemini-2.5-pro      // slower but often available when Flash is saturated
+gemini-2.0-flash
+gemini-flash-latest
+gemini-2.5-flash-lite
 ```
 
-Each Google AI Studio model has its own independent RPM/RPD quota, so
-falling back on 429 also works — different model, different bucket.
+Each AI Studio model has its own RPM/RPD quota, so falling back on 429 also works — different model, different bucket.
 
-**Retryable statuses** (`RETRYABLE_GEMINI_STATUS`): 429, 500, 503, 504.
-4xx auth / bad-request errors break the loop early — a different model
-won't fix a malformed request or revoked key.
+**Retryable statuses** (`RETRYABLE_GEMINI_STATUS`): 429, 500, 503, 504. 4xx auth / bad-request errors break the loop early.
 
-**Session stickiness** — `sessionPreferredModel` is set when a fallback
-succeeds, so subsequent calls start from the working model instead of
-re-hitting the known-busy primary every time. Reset on page reload.
+**Session stickiness** — `sessionPreferredModel` is set when a fallback succeeds, so subsequent calls start from the working model instead of re-hitting the known-busy primary.
 
 **UX:**
-- `callGeminiAPI(prompt, { model })` — low-level single-model call. Throws
-  `Error` augmented with `{ status, model, retryable }`.
-- `callGeminiWithFallback(prompt, { model, onFallback })` — walks the
-  chain. If `opts.model` is set, uses ONLY that model (no fallback) —
-  used when the user explicitly overrides from the error UI. Fires
-  `onFallback(model, priorError)` the first time it moves past the
-  primary so callers can surface a status message.
-- On total failure throws `Error` with `.tried = [{ model, status, message }]`
-  and a summary message distinguishing all-busy (503) vs. all-quota (429).
-
-**Shared error UI** — `makeAIErrorArea()` returns `{ el, getModel, render,
-renderSimple, reset }`. Each of the four AI dialogs appends its `el` to
-their existing error `<p>` on create; on error, `render(err)` shows the
-message plus a model `<select>` (Auto + each model id). The Submit
-handler passes `errorArea.getModel()` into the AI function so the user's
-choice is honored on retry. `renderSimple(text)` is used for non-AI
-errors (e.g. "page already exists") — hides the picker. `reset()` hides
-the block entirely when a retry begins.
-
-Version bump: fallback added in v1.3.0.
+- If `opts.model` is set, only that model is used (no fallback) — for explicit user override from the error UI.
+- `onFallback(model, priorError)` fires the first time we move past the primary so callers can show a status message.
+- On total failure, the error has `.tried = [{ model, status, message }]` and a summary distinguishing all-busy (503) vs. all-quota (429).
+- `makeAIErrorArea()` returns a shared error block (`{ el, getModel, render, renderSimple, reset }`) used by all four AI dialogs. `render(err)` shows the message plus a model `<select>` (Auto + each model id); `getModel()` is read on retry; `renderSimple(text)` is used for non-AI errors with the picker hidden.
 
 ### 14. Serializer / Exporter
 
-Produces clean HTML from the current DOM state.
-
-```
-serialize({ local: false })   ← for publish/export
-serialize({ local: true })    ← for local file save
+`serialize({ local })` clones `document.documentElement` and produces clean HTML. Idempotent.
 
 Both modes:
-  ├── Clone document.documentElement
-  ├── Remove all [data-editor-ui] elements (toolbar, modals, add/delete/reformat buttons)
-  ├── Remove contenteditable + spellcheck attributes
-  ├── Remove data-gitqi-bound, data-gitqi-nav-bound, and data-gitqi-video-bound attributes
-  ├── Resolve img[data-gitqi-src]: replace blob URL src with stored relative path
-  └── Restore original body padding-top and nav top offset
+- Remove all `[data-editor-ui]` (toolbar, modals, hover buttons, hint pills)
+- Remove `contenteditable` and `spellcheck`
+- Remove `data-gitqi-bound`, `data-gitqi-nav-bound`, `data-gitqi-video-bound`
+- Resolve `img[data-gitqi-src]` (blob URL → stored relative path)
+- Strip any inline `style` attribute on `<html>` (older versions wrote CSS vars there for live preview; would shadow `:root` updates)
+- Restore the original `body { padding-top }` and any fixed-nav `top` offset that was shifted for the toolbar
 
-local: false only:
-  └── Remove <script src="./secrets.js"> and <script src="...gitqi.js"> tags
+`local: false` only:
+- Strip `<script src="…secrets.js">` and `<script src="…gitqi.js">` (also legacy `webby.js`)
+- Strip the `data-gitqi-style` marker from styled spans (the spans keep their inline styles)
+- `obfuscateMailtoLinks(clone)` — see §14a
 
-exportToFile()
-  └── serialize({ local: false }) → trigger download as current page filename
-```
+`exportToFile()` runs `serialize({ local: false })` and triggers a download.
 
-The serializer is idempotent — running it multiple times on the same DOM produces the same output.
+### 14a. Email obfuscation (publish-time only)
+
+Plain `mailto:` addresses in published HTML are easy targets for spam scrapers. `obfuscateMailtoLinks(root)` runs in the publish path only — edits stay readable in the editor.
+
+For each `<a href="mailto:…">`:
+- Encode the full mailto URL via `gqEncode` (`btoa(unescape(encodeURIComponent(reversed-string)))`) — base64 of the UTF-8 reversed string. Store in `data-gqe`. Set `href="javascript:void(0)"`.
+- If any text node descendant of the link contains the address (case-insensitive substring), `obfuscateEmailInTextNodes` replaces the matching slice with an empty `<span data-gqt="…">` placeholder. Casing is preserved (the matched slice, not the lower-cased one, is what gets encoded) so `Foo@Bar.com` round-trips intact. Surrounding text in the same node is preserved as siblings.
+
+A single inline decoder script is appended once per page (idempotent via `[data-gqe-decoder]`) at the end of `<body>`. It walks `[data-gqe]` to fix hrefs and `[data-gqt]` to fill in text, then removes both attributes so the page DOM ends up clean.
+
+**No `<noscript>` fallback** — emitting the email there would defeat the protection. No-JS visitors don't get the email; that's the trade-off.
+
+**Cross-document safety** — `obfuscateMailtoLinks` is also called on parsed-from-disk pages in `publishSite()`. Helpers use `node.ownerDocument.create…` (not the main `document`) so nodes are created in the correct doc.
 
 ### 15. GitHub Publisher
 
-Pushes all pages and the pages inventory to GitHub via the REST API.
+`publishSite()`:
 
-```
-publishSite()
-  ├── 1. Current page: serialize({ local: false }) → github.putFile(CURRENT_FILENAME, html, sha)
-  ├── 2. All other pages (if dirHandle + pagesInventory):
-  │     For each page: read from disk → DOMParser → strip editor scripts
-  │         → github.putFile(page.file, stripped, sha)
-  └── 3. Inventory: github.putFile('gitqi-pages.json', JSON, sha)
+1. Current page: `serialize({ local: false })` → `github.putFile(CURRENT_FILENAME, html, sha)`
+2. All other pages (if `dirHandle` + `pagesInventory`): read each page from disk → `DOMParser` → `migrateLegacyWebbyMarkersInDoc(doc)` → strip editor scripts → strip `data-gitqi-style` markers → `obfuscateMailtoLinks(doc)` → `github.putFile`
+3. `gitqi-pages.json`: `github.putFile`
 
-github.getFileSHA(path)
-  └── GET /repos/{repo}/contents/{path}?ref={branch} → return .sha (null if 404)
+The disk-loaded pages were last saved with `local: true`, so they still have plain mailto links and `data-gitqi-style` markers — both have to be cleaned per-page on the publish path because they didn't go through `serialize({ local: false })`.
 
-github.putFile(path, content, sha)
-  └── PUT /repos/{repo}/contents/{path}
-        body: { message, content: btoa(unescape(encodeURIComponent(content))), sha, branch }
-
-github.uploadFile(path, base64Content)
-  └── getFileSHA(path) → putFile with pre-encoded binary content (for images)
-```
-
-SHA conflicts (HTTP 409) are silently swallowed for the current page; other pages with errors are reported in the status message.
+`github.getFileSHA(path)` → GET `/repos/{repo}/contents/{path}?ref={branch}` → return `.sha` (null on 404). `github.putFile(path, content, sha)` → PUT same endpoint, body `{ message, content: btoa(unescape(encodeURIComponent(content))), sha, branch }`. SHA conflicts (HTTP 409) on the current page are silently swallowed; other pages with errors are surfaced in the status message.
 
 ### 16. Undo / Redo
 
-Snapshot-based undo for structural operations. Text edits within `contenteditable` use the browser's native undo (Ctrl+Z). Capped at 20 entries.
+Snapshot-based, capped at 20 entries. Text edits use the browser's native undo (handled inside `contenteditable`); structural changes capture a snapshot.
 
-```
-snapshotForUndo()  ← called before: section delete, section reformat, nav reformat,
-                      generate section, generate page, delete page
-  └── captureSnapshot() → undoStack.push(); redoStack = []; updateUndoRedoButtons()
+`snapshotForUndo()` is called before: section delete, section reformat, nav reformat, generate section, generate page, delete page, **duplicate section**, **move section**, remove video, and a few smaller edge cases.
 
-captureSnapshot()
-  ├── Clone body — strip [data-editor-ui], contenteditable, spellcheck, binding attrs
-  ├── Capture main <style> textContent
-  ├── Capture all <style id="__gitqi-section-*"> elements
-  └── Capture <style id="__gitqi-nav-styles"> if present
+`captureSnapshot()` clones `<body>`, strips `[data-editor-ui]` and binding markers, and stores `bodyHTML` plus the main style content, all `<style id="__gitqi-section-*">`, and `<style id="__gitqi-nav-styles">`.
 
-restoreSnapshot(snapshot)
-  ├── Disconnect mutation observer
-  ├── closeLinkPopover() + hideSelectionToolbar()
-  ├── Save [data-editor-ui] child elements from body
-  ├── document.body.innerHTML = snapshot.bodyHTML
-  ├── Re-attach saved editor UI elements
-  ├── Restore main style block + all section/nav style blocks
-  ├── activateZones() + activateNav()
-  ├── rerunInlineScripts(nav)   ← rebinds hamburger toggle after DOM replacement
-  ├── bindMutationObserver()    ← restart observer (was disconnected)
-  └── lastSyncedSharedSnapshot = getSharedSnapshot()
+`restoreSnapshot(snapshot)`: disconnect mutation observer → close popovers → save then re-attach `[data-editor-ui]` children → replace `body.innerHTML` → restore style blocks → `activateZones() + activateNav()` → `rerunInlineScripts(nav)` (rebinds hamburger toggles) → re-bind mutation observer → reset `lastSyncedSharedSnapshot`.
 
-undo()  → redoStack.push(captureSnapshot()) → restoreSnapshot(undoStack.pop())
-redo()  → undoStack.push(captureSnapshot()) → restoreSnapshot(redoStack.pop())
-
-bindUndoRedo()
-  └── Ctrl+Z → undo(); Ctrl+Shift+Z / Ctrl+Y → redo()
-      (skips when e.target.isContentEditable — browser handles text undo there)
-```
+Keyboard: Ctrl+Z → undo; Ctrl+Shift+Z / Ctrl+Y → redo. Skipped when `e.target.isContentEditable`.
 
 ### 17. Theme Editor
 
-Panel that exposes CSS custom properties and site identity fields as live inputs.
+Toggled by the **Theme** toolbar button, mutually exclusive with the Pages panel.
 
-```
-openThemeEditor()  ← toggled by Theme toolbar button; mutually exclusive with Pages panel
-  ├── Site Identity section:
-  │     ├── Favicon picker → convertImageToPng() → github.uploadFile() + local write → upsertFaviconLinks()
-  │     │     (sync then propagates <link rel="icon"> + apple-touch-icon to all pages)
-  │     ├── Page title input → document.title + <title>  ← page-specific, not synced
-  │     ├── Meta description textarea → <meta name="description">  ← page-specific
-  │     └── Keywords input → <meta name="keywords">  ← page-specific
-  └── CSS Variables section (grouped: Colors / Typography / Spacing / Layout):
-        ├── Color variables → color picker + hex input
-        ├── Font-family variables → text input + "Aa" toggle button → makeGoogleFontPicker()
-        │     └── Pick applies value + ensureGoogleFontLink(font)
-        ├── Other variables → text input
-        ├── "Add font variable" inline form (Typography group only):
-        │     ├── --font-{name} + value inputs
-        │     ├── makeGoogleFontPicker() below the value input
-        │     │     (pick fills value only — name is user-chosen so it describes the role, not the font; <link> injected on Add, not on preview)
-        │     └── On Add: addStyleVar() + ensureGoogleFontLink(pickedFont)
-        └── On input: document.documentElement.style.setProperty() + patch <style> textContent
-              (main <style> mutations then propagate to every page via the shared sync)
-```
+- **Site Identity** — favicon (PNG-converted, uploaded + written locally + favicon links upserted), page title, meta description, keywords. Title/description/keywords are page-specific (not synced); favicon syncs.
+- **CSS Variables** — grouped Colors / Typography / Spacing / Layout. Live preview via `documentElement.style.setProperty()` plus patching the main `<style>` textContent (which then propagates to every page on the next sync).
+- Color vars get a color picker + hex input. Font-family vars get a text input plus the **Aa** Google Fonts picker (`makeGoogleFontPicker`). The Typography group has an inline "Add font variable" form whose font picker fills the value only — the var name describes the role (e.g. `--font-display`), not the family — and the `<link>` is injected on Add, not on preview.
 
 ### 18. Google Fonts
 
-Full Google Fonts catalog, sorted by popularity. A small curated list is compiled into `gitqi.js` as a fallback; at runtime `loadGoogleFontsManifest()` fetches the complete catalog from `google-fonts.json` (sibling of `gitqi.js`, generated via `make fonts`) and replaces the in-memory `GOOGLE_FONTS`. Entries are shaped `{ name, cat, weights }`; array order is popularity rank.
+Full Google Fonts catalog, sorted by popularity. A small curated list is compiled into `gitqi.js` as a fallback; at runtime `loadGoogleFontsManifest()` fetches the complete catalog from `google-fonts.json` (sibling of `gitqi.js`, generated via `make fonts`) and replaces the in-memory `GOOGLE_FONTS`. Entries: `{ name, cat, weights }`; array order is popularity rank.
 
-```
-loadGoogleFontsManifest()   ← called at the top of init()
-  ├── Fast path: read cached manifest from localStorage (key 'gitqi:fonts-manifest:v1')
-  │     install synchronously if present
-  └── Background fetch: {SCRIPT_BASE_URL}google-fonts.json → installFontsManifest()
-        → write to localStorage on success. Failures are silent; curated fallback remains.
+Fast path reads a cached manifest from `localStorage` (`gitqi:fonts-manifest:v1`) and installs it synchronously; background fetch refreshes the cache. Failures are silent — the curated fallback remains.
 
-ensureGoogleFontLink(font)
-  ├── Upsert <link rel="preconnect" href="https://fonts.googleapis.com">
-  ├── Upsert <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  └── Append <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family={name}:wght@{weights}&display=swap">
-      (idempotent — skips insertion if a <link> for the family is already present)
+`ensureGoogleFontLink(font)` upserts the two preconnect links and appends a `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family={name}:wght@{weights}&display=swap">`. Idempotent — skips insertion if the family is already present.
 
-openFontPreviewer(onPick)   ← modal, replaces the old inline picker
-  ├── Header + close button
-  ├── Sample text input (default "The quick brown fox…"; persisted in localStorage key
-  │       'gitqi:font-preview-sample'; live-updates only rows whose font has finished
-  │       loading — unloaded rows keep their "…" placeholder until ready)
-  ├── Category pills: All / Sans Serif / Serif / Display / Handwriting / Monospace
-  ├── Search box (filters by name) + sort toggle (Popularity / A–Z)
-  └── Scrolling list of all GOOGLE_FONTS rows.
-      ├── Rows for fonts not yet in previewLoadedFonts render in T.fontBody with a
-      │     "…" placeholder so the whole list paints immediately (no layout thrash,
-      │     no scroll stalls). onPreviewFontReady(name, cb) flips the row to the
-      │     real family + current sample text when the FontFace registers.
-      ├── IntersectionObserver (root=list, rootMargin=240px) collects visible
-      │     fonts into a pending set and flushes them via queuePreviewFontLoad(
-      │     font, priority=true) after a 500ms debounce — a fast scroll past many
-      │     rows doesn't blast the rate-limiter with requests for fonts the user
-      │     already scrolled past.
-      └── Row click → onPick(font, fontFamilyStack(font)); caller commits the <link>
-            via ensureGoogleFontLink(). The previewer itself never calls it, so
-            cancelled / aborted previews don't leak links into <head>.
+**Font previewer** (`openFontPreviewer(onPick)`) — modal with sample-text input (persisted in `localStorage`), category pills, name search, and popularity / A–Z sort. Rows render immediately with a "…" placeholder; an `IntersectionObserver` (rootMargin 240px, 500ms debounce) collects visible fonts and feeds them into a rate-limited loader that registers FontFaces directly into `document.fonts` (no DOM `<style>` or `<link>` injection during preview). Loader runs `PREVIEW_LOAD_BATCH` (4) at `PREVIEW_LOAD_INTERVAL_MS` (250ms) ≈ 16 fonts/sec. The previewer never injects `<link>` tags itself — only the row click does (via `onPick` → caller → `ensureGoogleFontLink`), so cancelled previews don't leak.
 
-prewarmFontPreview()   ← called by openThemeEditor()
-  └── Enqueues every GOOGLE_FONTS family in popularity (array) order so that by
-      the time the user opens the picker, most popular families are already
-      rendered. Safe to call repeatedly; the dedup sets make re-calls a no-op.
+`prewarmFontPreview()` (called by `openThemeEditor`) enqueues every family in popularity order so the picker opens with most popular families already rendered.
 
-queuePreviewFontLoad(font, priority)  /  drainPreviewLoadQueue()  /  loadPreviewFont(font)
-  ├── previewLoadedFonts:   Set<string>  ← names whose FontFaces are in document.fonts
-  ├── previewLoadingFonts:  Set<string>  ← names currently fetching / loading
-  ├── previewFailedFonts:   Set<string>  ← names that failed (no retry)
-  ├── previewQueuedFonts:   Set<string>  ← names currently in the queue
-  ├── previewLoadQueue:     font[]       ← FIFO; priority:true enqueues at head
-  ├── previewLoadCallbacks: Map<name, fn[]>  ← row-flip callbacks, fired on load
-  └── Drain tick kicks off PREVIEW_LOAD_BATCH (4) loadPreviewFont() calls every
-      PREVIEW_LOAD_INTERVAL_MS (250ms) ≈ 16 fonts/sec. Each loadPreviewFont:
-        fetch CSS2 URL → regex-parse @font-face blocks for src/weight/style →
-        new FontFace() per variant → Promise.all(face.load() + document.fonts.add())
-        → firePreviewReady(name) drains onPreviewFontReady callbacks.
-      Rate limiting + FontFace API (vs. the old @import-into-<style> approach)
-      is what keeps the toolbar/title from throbbing and the scroll from stalling
-      under load: fonts register directly into document.fonts without mutating
-      the DOM, so only the rows that actually use each family re-cascade.
-
-  No preview state ever reaches disk or deployed output — FontFace registrations
-  are runtime-only (not captured by serializer or snapshots), and the picker
-  does not inject any <link> tags.
-
-pruneUnusedGoogleFontLinks()   ← called at the top of saveChanges() on every auto-save
-  ├── extractReferencedFontNames(getAllManagedCSS())  ← scans main <style>, nav style,
-  │       and per-section styles for font-family: and --font-* declarations
-  └── For each <link href*="fonts.googleapis.com/css">: if its family is not referenced,
-      remove it. When the last stylesheet is removed, the preconnects are also cleared.
-```
-
-The shared-head sync treats every `<link href*="fonts.googleapis.com">` and `<link href*="fonts.gstatic.com">` as site-wide — adding a font on any page distributes it to all other pages on the next auto-save. Because prune runs before the snapshot, abandoned font `<link>`s are also distributed — i.e. *removed* from every page — on the next sync.
+`pruneUnusedGoogleFontLinks()` runs at the top of every `saveChanges()`. It scans the main `<style>`, nav style, and per-section styles for `font-family:` and `--font-*` declarations; any `<link href*="fonts.googleapis.com/css">` whose family isn't referenced is removed (preconnects too when the last stylesheet goes). The shared-head sync then propagates the cleanup to every other page.
 
 ### 19. DOM Helpers
 
-```
-rerunInlineScripts(el)
-  └── For each inline <script> in el: replace with a fresh <script> element to force execution.
-      Used after nav replacement (reformatNav, restoreSnapshot) to rebind hamburger listeners.
-      Scripts parsed via innerHTML/replaceWith are inert — the browser does not run them.
-```
+`rerunInlineScripts(el)` — replaces every inline `<script>` with a fresh element to force execution. Scripts parsed via `innerHTML`/`replaceWith` are inert; the browser does not run them. Used after nav replacement (`reformatNav`, `restoreSnapshot`) to rebind hamburger listeners.
 
 ---
 
@@ -844,9 +401,9 @@ The base `<style>` block in each page must define CSS custom properties so AI-ge
 }
 ```
 
-Additional style blocks used by GitQi at runtime:
+**GitQi-managed style blocks:**
 - `<style id="__gitqi-nav-styles">` — nav-specific CSS written by Reformat Nav
-- `<style id="__gitqi-section-{slug}-styles">` — per-section CSS written by section Reformat / Add Section
+- `<style id="__gitqi-section-{slug}-styles">` — per-section CSS written by section Reformat / Add Section. Duplicate clones the block under the new slug with regex slug rewrites.
 
 ---
 
@@ -856,6 +413,7 @@ Additional style blocks used by GitQi at runtime:
 - The GitHub PAT should be a **fine-grained token** scoped to the single site repo with `contents: read+write` only
 - The Gemini API key is used **client-side** — acceptable for personal/single-owner use; for shared or public use, proxy through a serverless function
 - The exported/published HTML contains **no credentials** and **no editor code**
+- `mailto:` links are obfuscated in published output (see §14a). Plain emails authored as ordinary text outside `<a href="mailto:…">` are not protected — that's the user's call.
 
 ---
 
@@ -863,14 +421,14 @@ Additional style blocks used by GitQi at runtime:
 
 GitQi requires the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API).
 
-| Browser | Supported |
-|---|---|
-| Chrome 86+ | ✓ |
-| Edge 86+ | ✓ |
-| Safari | ✗ |
-| Firefox | ✗ |
+| Browser | Edit mode | Public site |
+|---|---|---|
+| Chrome 86+ | ✓ | ✓ |
+| Edge 86+ | ✓ | ✓ |
+| Safari | ✗ | ✓ |
+| Firefox | ✗ | ✓ |
 
-Opening a page in an unsupported browser shows a blocking modal and prevents the editor from loading entirely.
+Opening a page in an unsupported browser shows a blocking modal and prevents the editor from loading entirely. The published site is plain HTML and works everywhere.
 
 ---
 

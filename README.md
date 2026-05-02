@@ -127,15 +127,20 @@ GitHub shows a banner: _"Your site is live at https://your-username.github.io/yo
 
 **Text formatting** — select text to reveal a floating toolbar. Buttons: **B** (bold), _I_ (italic), 🎨 (color — theme swatches, custom picker, or remove), **Aa** (font — theme font vars or clear), **A↕** (font size — em-relative presets from Smaller to Huge), `</>` (inline code), 🔗 (link).
 
-**Links** — click any link (body or nav) to open the popover. Fields: display text, URL, **Go to link →** (preview), page/section picker (jumps to any page or `#anchor` across your site), open-in-new-tab toggle, remove-link.
+**Links** — click any link (body or nav) to open the popover. Fields: display text, URL, **Go to link →** (preview), page/section picker (jumps to any page or `#anchor` across your site), open-in-new-tab toggle, remove-link. Type a `mailto:` URL and Subject + Body fields appear; the Go-to-link button becomes **Test email →** so you can verify the message opens correctly in your default mail client.
+
+**Email protection** — `mailto:` links and any visible email address inside them are obfuscated at publish time only. The published HTML never contains a plain `mailto:` href or email address — a tiny inline decoder script reveals them at load time, so spam crawlers that scrape pages for `@`-shaped strings see scrambled gibberish but real visitors get a working link. The editor itself stays fully readable.
 
 **Images** — click any `data-editable-image` element to replace it. The file is written to your local `assets/` folder and queued for GitHub upload on the next publish.
 
-**Sections**
+**Sections** — hover any section to reveal its controls.
 
 - Hover between sections → **+ Add Section** (AI-generate a themed new section)
-- Hover a section → **⟳ Reformat** (restructure layout with AI; existing content preserved)
-- Hover a section → **✕ Delete Section**
+- Right side of the section: **⧉ Duplicate** · **⟳ Reformat** · **✕ Delete**
+  - Duplicate clones the section in place with a unique slug (e.g. `hero` → `hero-2`) — handy when building a series of similar blocks before editing each one. No AI involved; instant.
+  - Reformat asks the AI to restructure the layout while preserving content (text, images, videos).
+- Left side of the section: **↑ / ↓** arrows — move the section up or down the page (bounded between nav and footer).
+- Footer sections are pinned: Duplicate and the move arrows are suppressed for whatever element matches `<footer>` (or `[data-zone="footer"]`).
 
 **Navigation** — hover the nav → **⟳ Reformat Nav** (AI restructure). Changes sync to every other page automatically.
 
@@ -163,6 +168,7 @@ GitQi uses data attributes to identify editable regions. The AI-generated HTML i
 | `data-zone-label`     | `<section>`      | Human-readable label shown in the delete confirmation, e.g. `"Hero"`.                                               |
 | `data-editable`       | Any text element | Makes the element directly editable via `contenteditable`.                                                          |
 | `data-editable-image` | `<img>`          | Makes the image replaceable by clicking.                                                                            |
+| `data-editable-video` | `<div>` wrapping a YouTube `<iframe>` | Makes the video replaceable. Click the wrapper → paste any YouTube URL (watch / `youtu.be` / embed / shorts). |
 
 **Minimal example:**
 
