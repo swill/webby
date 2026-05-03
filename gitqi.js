@@ -2929,13 +2929,16 @@ Return ONLY the complete HTML. No explanation, no markdown fences. Start with <!
       if (dirHandle) {
         // Folder is linked — save the image file locally so ./assets/... resolves correctly
         await writeImageToLocalDir(file);
-        imgEl.src = `./${path}`;
-        imgEl.removeAttribute('data-gitqi-src');
-      } else {
-        // No local file access — display via blob URL; serializer swaps to relative path
-        imgEl.src = URL.createObjectURL(new Blob([buffer], { type: file.type }));
-        imgEl.dataset.gitqiSrc = `./${path}`;
       }
+
+      // Always display via a fresh blob URL in the editor: when the user
+      // replaces an image with a new file of the same name, the on-disk path
+      // doesn't change, so reassigning imgEl.src to the same './assets/foo.jpg'
+      // string would leave the browser showing its cached copy of the old
+      // bytes. The serializer resolves data-gitqi-src back to the relative
+      // path on save and publish.
+      imgEl.src = URL.createObjectURL(new Blob([buffer], { type: file.type }));
+      imgEl.dataset.gitqiSrc = `./${path}`;
 
       setDirty(true);
       showStatus('Image uploaded ✓');
@@ -5046,21 +5049,19 @@ RULES:
           const valueRow = el('div');
           css(valueRow, { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' });
 
-          const colorPicker = el('input');
-          colorPicker.type = 'color';
-          colorPicker.value = '#6366f1';
-          css(colorPicker, { width: '30px', height: '28px', padding: '1px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, cursor: 'pointer', flexShrink: '0', background: '#fff' });
+          const initialColor = '#6366f1';
 
           const hexInput = el('input');
           hexInput.type = 'text';
-          hexInput.value = colorPicker.value;
+          hexInput.value = initialColor;
           hexInput.spellcheck = false;
           css(hexInput, { flex: '1', minWidth: '0', padding: '5px 8px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, fontSize: '11px', fontFamily: T.fontMono, background: '#fff', color: T.primary, outline: 'none' });
 
-          colorPicker.addEventListener('input', () => { hexInput.value = colorPicker.value; });
+          const colorPicker = makeColorSwatch(initialColor, val => { hexInput.value = val; });
+
           hexInput.addEventListener('input', () => {
             const v = hexInput.value.trim();
-            if (/^#[0-9a-f]{6}$/i.test(v)) colorPicker.value = v;
+            if (/^#[0-9a-f]{6}$/i.test(v)) colorPicker.setColor(v);
           });
 
           valueRow.append(colorPicker, hexInput);
@@ -5266,6 +5267,58 @@ RULES:
     document.body.appendChild(panel);
   }
 
+  // Native <input type="color"> opens its OS picker anchored to the input's
+  // screen position. The theme panel is pinned to the right edge, so a picker
+  // anchored at a swatch inside the panel overflows the right of the viewport.
+  // Route every theme color edit through one shared, invisible color input
+  // re-positioned near the left edge each time so the picker always has room.
+  function openThemeColorPicker(initial, onInput, anchorEl) {
+    let inp = document.getElementById('__gitqi-color-proxy');
+    if (!inp) {
+      inp = el('input', { id: '__gitqi-color-proxy', 'data-editor-ui': '' });
+      inp.type = 'color';
+      css(inp, {
+        position: 'fixed',
+        width: '1px',
+        height: '1px',
+        opacity: '0',
+        pointerEvents: 'none',
+        border: '0',
+        padding: '0',
+        margin: '0',
+        zIndex: '2147483647',
+      });
+      document.body.appendChild(inp);
+    }
+    const r = anchorEl ? anchorEl.getBoundingClientRect() : null;
+    const top = r
+      ? Math.min(Math.max(r.top, 60), Math.max(60, window.innerHeight - 280))
+      : Math.max(60, window.innerHeight / 2);
+    inp.style.top = top + 'px';
+    inp.style.left = '24px';
+    inp.value = initial;
+    inp.oninput = () => onInput(inp.value);
+    inp.click();
+  }
+
+  function makeColorSwatch(initial, onPick) {
+    const btn = el('button', { type: 'button', 'data-editor-ui': '' });
+    css(btn, {
+      width: '30px', height: '28px', padding: '0',
+      border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm,
+      background: initial, cursor: 'pointer', flexShrink: '0',
+    });
+    btn._gqColor = initial;
+    btn.setColor = (v) => { btn._gqColor = v; btn.style.background = v; };
+    btn.addEventListener('click', () => {
+      openThemeColorPicker(btn._gqColor, val => {
+        btn.setColor(val);
+        onPick(val);
+      }, btn);
+    });
+    return btn;
+  }
+
   function makeVarRow(varName, varValue, styleEl) {
     const row = el('div');
     css(row, { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' });
@@ -5291,33 +5344,30 @@ RULES:
     if (isColor) {
       const hexVal = toHex(trimmed);
 
-      const picker = el('input');
-      picker.type = 'color';
-      picker.value = hexVal;
-      css(picker, { width: '30px', height: '28px', padding: '1px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, cursor: 'pointer', flexShrink: '0', background: '#fff' });
+      const apply = val => {
+        updateStyleVar(styleEl, varName, val);
+        setDirty(true);
+      };
 
       const hexInput = el('input');
       hexInput.type = 'text';
       hexInput.value = hexVal;
       css(hexInput, { width: '78px', padding: '5px 8px', border: `1.5px solid ${T.border}`, borderRadius: T.radiusSm, fontSize: '11px', fontFamily: T.fontMono, flexShrink: '0', background: '#fff', color: T.primary, outline: 'none' });
 
-      const apply = val => {
-        updateStyleVar(styleEl, varName, val);
-        setDirty(true);
-      };
-      picker.addEventListener('input', () => {
-        hexInput.value = picker.value;
-        apply(picker.value);
+      const swatch = makeColorSwatch(hexVal, val => {
+        hexInput.value = val;
+        apply(val);
       });
+
       hexInput.addEventListener('input', () => {
         const val = hexInput.value.trim();
         if (/^#[0-9a-f]{6}$/i.test(val)) {
-          picker.value = val;
+          swatch.setColor(val);
           apply(val);
         }
       });
 
-      row.append(label, picker, hexInput);
+      row.append(label, swatch, hexInput);
     } else {
       const input = el('input');
       input.type = 'text';
