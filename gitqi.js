@@ -1362,6 +1362,17 @@
     if (newSlug) {
       clone.setAttribute('data-zone', newSlug);
       clone.setAttribute('id', newSlug);
+      const oldLabel = section.dataset.zoneLabel;
+      if (oldLabel) {
+        const suffixMatch = newSlug.match(/-(\d+)$/);
+        if (suffixMatch) {
+          const n = suffixMatch[1];
+          // Strip an existing trailing number (with optional separator) so
+          // "Hero 2" → "Hero 3" rather than "Hero 2 3".
+          const stem = oldLabel.replace(/[\s\-_]*\d+\s*$/, '').trim();
+          clone.setAttribute('data-zone-label', (stem || oldLabel) + ' ' + n);
+        }
+      }
     } else {
       clone.removeAttribute('id');
     }
