@@ -5290,12 +5290,29 @@ RULES:
       });
       document.body.appendChild(inp);
     }
+    // Chromium opens the OS color picker anchored at the input's screen
+    // position, extending down and to the right. To make the picker appear
+    // beside the clicked swatch but flowing LEFT (so it doesn't overflow the
+    // right edge of the viewport when the panel is right-pinned), park the
+    // proxy input so its left edge sits ~picker-width to the LEFT of the
+    // swatch's right edge. The picker then opens from there, ending near
+    // the swatch's right edge.
+    const PICKER_W = 240;
+    const PICKER_H = 260;
     const r = anchorEl ? anchorEl.getBoundingClientRect() : null;
-    const top = r
-      ? Math.min(Math.max(r.top, 60), Math.max(60, window.innerHeight - 280))
-      : Math.max(60, window.innerHeight / 2);
+    let left, top;
+    if (r) {
+      left = Math.max(8, Math.min(window.innerWidth - PICKER_W - 8, r.right - PICKER_W));
+      top = r.bottom + 2;
+      if (top + PICKER_H > window.innerHeight - 8) {
+        top = Math.max(8, r.top - PICKER_H - 2);
+      }
+    } else {
+      left = Math.max(8, (window.innerWidth - PICKER_W) / 2);
+      top = Math.max(8, (window.innerHeight - PICKER_H) / 2);
+    }
+    inp.style.left = left + 'px';
     inp.style.top = top + 'px';
-    inp.style.left = '24px';
     inp.value = initial;
     inp.oninput = () => onInput(inp.value);
     inp.click();
