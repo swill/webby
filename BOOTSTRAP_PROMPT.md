@@ -90,13 +90,25 @@ Generate a single index.html file with the following:
 
 1. DOCTYPE html5, semantic HTML, mobile-first responsive layout
 2. No external CSS frameworks — all styles inline in a <style> block
-3. A CSS custom property system using the variables defined from the images:
-   --color-primary, --color-secondary, --color-accent,
-   --color-bg, --color-bg-alt, --color-text, --color-text-muted,
-   --font-heading, --font-body,
-   --space-xs through --space-xl,
-   --container-width, --radius, --shadow
-4. Google Fonts import for the chosen typefaces (2 max)
+3. A CSS custom property system using the variables defined from the images.
+   This is the MINIMUM set — extend it freely when the design calls for it. The GitQi Theme editor
+   auto-groups any variable that uses these prefixes, so additional ones become editable
+   automatically:
+     - --color-*  (Colors group)      add e.g. --color-border, --color-surface, --color-hover,
+                                              --color-success, --color-warning when the design needs them
+     - --font-*   (Typography group)  add e.g. --font-display or --font-mono if a third face fits
+     - --space-*  (Spacing group)     add e.g. --space-2xl, --space-3xl for larger rhythm
+   Required minimum:
+     --color-primary, --color-secondary, --color-accent,
+     --color-bg, --color-bg-alt, --color-text, --color-text-muted,
+     --font-heading, --font-body,
+     --space-xs through --space-xl,
+     --container-width, --radius, --shadow
+   Prefer extending the variable system over hardcoding values in section CSS — anything not
+   captured as a `--*` variable can't be themed later from the editor.
+4. Google Fonts import for the chosen typefaces. Typically 2 (heading + body); a third is fine when
+   the design genuinely calls for a distinct display/accent face. Keep additions intentional, not
+   decorative — every extra family is another network request and another point of visual noise.
 5. Each section must have:
    - data-zone="{slug}" on the <section> element
    - data-zone-label="{Human Label}" on the <section> element
@@ -216,13 +228,26 @@ Generate one HTML file per page, plus a gitqi-pages.json manifest. Requirements 
 
 1. DOCTYPE html5, semantic HTML, mobile-first responsive layout
 2. No external CSS frameworks — all styles inline in a <style> block
-3. IDENTICAL <style> block in every page — the same CSS custom property system and base styles:
-   --color-primary, --color-secondary, --color-accent,
-   --color-bg, --color-bg-alt, --color-text, --color-text-muted,
-   --font-heading, --font-body,
-   --space-xs through --space-xl,
-   --container-width, --radius, --shadow
-4. Google Fonts import for the chosen typefaces (2 max) — same import in every page
+3. IDENTICAL <style> block in every page — the same CSS custom property system and base styles.
+   This is the MINIMUM set — extend it freely when the design calls for it (and keep the extensions
+   identical across all pages). The GitQi Theme editor auto-groups any variable that uses these
+   prefixes, so additional ones become editable automatically:
+     - --color-*  (Colors group)      add e.g. --color-border, --color-surface, --color-hover,
+                                              --color-success, --color-warning when the design needs them
+     - --font-*   (Typography group)  add e.g. --font-display or --font-mono if a third face fits
+     - --space-*  (Spacing group)     add e.g. --space-2xl, --space-3xl for larger rhythm
+   Required minimum:
+     --color-primary, --color-secondary, --color-accent,
+     --color-bg, --color-bg-alt, --color-text, --color-text-muted,
+     --font-heading, --font-body,
+     --space-xs through --space-xl,
+     --container-width, --radius, --shadow
+   Prefer extending the variable system over hardcoding values in section CSS — anything not
+   captured as a `--*` variable can't be themed later from the editor.
+4. Google Fonts import for the chosen typefaces — same import in every page. Typically 2 (heading +
+   body); a third is fine when the design genuinely calls for a distinct display/accent face. Keep
+   additions intentional, not decorative — every extra family is another network request and
+   another point of visual noise.
 5. Each section must have:
    - data-zone="{slug}" on the <section> element (slug must be unique within the page)
    - data-zone-label="{Human Label}" on the <section> element
