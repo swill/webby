@@ -207,7 +207,7 @@ Multi-page sites use a `gitqi-pages.json` manifest in the site folder alongside 
 }
 ```
 
-GitQi creates and maintains this file automatically. It's pushed to GitHub on every publish. Adding GitQi to an existing single-page site creates the manifest automatically the first time you link your folder.
+GitQi creates and maintains this file automatically — it's machine-managed. The bootstrap prompt produces the initial version for multi-page sites; from then on the editor rewrites it whenever pages are added, renamed, or deleted, and pushes it to GitHub on every publish. Don't hand-edit it: your changes will be overwritten on the next save. Adding GitQi to an existing single-page site creates the manifest automatically the first time you link your folder.
 
 **Shared head + nav sync** — on every auto-save, GitQi compares the current page's shared elements against a snapshot from the last sync. If anything changed, the updated elements are written to every other page file on disk automatically.
 

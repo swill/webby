@@ -1,12 +1,22 @@
 # Bootstrap Prompt — New Site Generator
 
-Use this prompt with Claude.ai (or Claude Code) to generate the initial HTML files for a new site. Fill in all `[BRACKETED]` sections before running.
+Use this prompt with Claude.ai (or Claude Code) to generate the initial HTML files for a new site. Fill in the user-input fields below, then paste the whole prompt into the AI.
 
 This is **Step 1** of the Get Key path. The guided walkthrough — including GitHub repo setup, tokens, and publishing — lives at [gitqi.com/get-key.html](https://gitqi.com/get-key.html) and in the [README](./README.md#-the-get-key-path).
 
 Two modes are supported:
 - **Single-page** — everything on one `index.html`
 - **Multi-page** — separate HTML file per page, shared nav and theme, plus a `gitqi-pages.json` manifest
+
+---
+
+## What you edit vs. what the AI handles
+
+These prompts are dual-audience — read by both you (a human) and the AI. To keep the line clear:
+
+- **`[USER INPUT]` blocks** — the only parts you should change. Fill in every `[bracketed]` field inside them. Each prompt below has exactly one.
+- **`[AI INSTRUCTIONS]` block** — everything after the `[AI INSTRUCTIONS — do not modify below this line]` marker. These are technical rules the editor depends on (data attributes, script tags, video embed shape, output format). Editing them can break the editor in subtle ways.
+- **Machine-managed files** — files like `gitqi-pages.json` are produced by the AI at bootstrap and maintained automatically by GitQi after that. **Don't hand-edit them later** — the editor rewrites them whenever pages are added, renamed, or removed, and your changes will be overwritten.
 
 ---
 
@@ -18,10 +28,10 @@ Two modes are supported:
    - The pages and sections you want on the site
    - A "vibe" description (tone, feel, aesthetic)
 
-2. Paste the appropriate prompt below into Claude Code or Claude.ai, attach your images, and fill in the variables.
+2. Pick the appropriate prompt below (Single-page or Multi-page) and edit only the `[USER INPUT]` section. Paste the whole prompt into Claude Code or Claude.ai with your images attached.
 
 3. **Single-page:** output is one `index.html`.  
-   **Multi-page:** output is one HTML file per page plus `gitqi-pages.json`.
+   **Multi-page:** output is one HTML file per page plus `gitqi-pages.json` (machine-managed — don't edit by hand later).
 
 ---
 
@@ -37,7 +47,7 @@ I am attaching a selection of inspiration images. Analyze them for:
 
 Use those signals to define a cohesive CSS variable system and base styles.
 
----
+[USER INPUT — fill in the bracketed fields below; do not modify anything outside this block]
 
 BUSINESS DETAILS:
 Name:         [Full name or practice name]
@@ -71,7 +81,9 @@ SECTIONS TO INCLUDE:
 
 Adjust this list to match the actual site.]
 
----
+[END USER INPUT]
+
+[AI INSTRUCTIONS — do not modify below this line. These are technical rules the GitQi editor depends on.]
 
 TECHNICAL REQUIREMENTS:
 Generate a single index.html file with the following:
@@ -146,7 +158,7 @@ I am attaching a selection of inspiration images. Analyze them for:
 
 Use those signals to define a cohesive CSS variable system and base styles shared across all pages.
 
----
+[USER INPUT — fill in the bracketed fields below; do not modify anything outside this block]
 
 BUSINESS DETAILS:
 Name:         [Full name or practice name]
@@ -195,7 +207,9 @@ PAGES TO GENERATE:
 
 Adjust pages, filenames, and sections to match the actual site.]
 
----
+[END USER INPUT]
+
+[AI INSTRUCTIONS — do not modify below this line. These are technical rules the GitQi editor depends on.]
 
 TECHNICAL REQUIREMENTS:
 Generate one HTML file per page, plus a gitqi-pages.json manifest. Requirements for each file:
@@ -249,8 +263,14 @@ Generate one HTML file per page, plus a gitqi-pages.json manifest. Requirements 
 
 ---
 
-gitqi-pages.json FORMAT:
-Also output a gitqi-pages.json file with this exact structure:
+MACHINE-MANAGED FILE — gitqi-pages.json:
+This file is the page inventory. Generate it ONCE here at bootstrap based on the pages you produce
+above. After bootstrap, GitQi maintains it automatically — when the user adds, renames, or deletes
+pages from the editor, the manifest is rewritten to match. Users should never hand-edit this file.
+
+Output it with this exact structure (one entry per HTML file you generate above; "title" is the
+per-page <title>, "navLabel" is what appears in the nav):
+
 {
   "pages": [
     { "file": "index.html",    "title": "Home — [Business Name]",    "navLabel": "Home" },
@@ -259,7 +279,6 @@ Also output a gitqi-pages.json file with this exact structure:
     { "file": "contact.html",  "title": "Contact — [Business Name]", "navLabel": "Contact" }
   ]
 }
-(Adjust entries to match the pages you generate.)
 
 ---
 
@@ -294,10 +313,11 @@ No explanation, no markdown fences around file contents, no preamble.
 
 1. Copy each `=== FILE: xxx ===` section into its own file in your site folder.
    You'll have `index.html`, `about.html`, etc. and `gitqi-pages.json`.
+2. Leave `gitqi-pages.json` alone from this point on — GitQi maintains it for you whenever you add or remove pages from the editor's **Pages** panel.
 
 ### Both
 
-2. **Add `secrets.js`** to the same folder:
+3. **Add `secrets.js`** to the same folder:
    ```js
    window.SITE_SECRETS = {
      geminiKey:   "AIza...",       // Free at aistudio.google.com
@@ -307,26 +327,26 @@ No explanation, no markdown fences around file contents, no preamble.
    };
    ```
 
-3. **Open any page in Chrome or Edge** — edit mode activates automatically. Safari and Firefox are not supported.
+4. **Open any page in Chrome or Edge** — edit mode activates automatically. Safari and Firefox are not supported.
 
-4. **Link your site folder** — a banner will appear below the toolbar. Click **Select Folder** and choose the folder containing your HTML files. Once linked, every edit saves automatically and nav changes sync across all pages.
+5. **Link your site folder** — a banner will appear below the toolbar. Click **Select Folder** and choose the folder containing your HTML files. Once linked, every edit saves automatically and nav changes sync across all pages.
 
-5. Replace placeholder text by clicking and typing directly on the page. Select text to get a formatting toolbar (bold, italic, code, link).
+6. Replace placeholder text by clicking and typing directly on the page. Select text to get a formatting toolbar (bold, italic, code, link).
 
-6. Replace placeholder images by clicking on any image.
+7. Replace placeholder images by clicking on any image.
 
-7. Use the toolbar to access all editing features:
+8. Use the toolbar to access all editing features:
    - **↩ / ↪** — Undo and redo structural changes (AI actions, deletions)
    - **Pages** — See all pages, navigate between them, add new AI-generated pages, or delete pages
    - **Theme** — Adjust colours, fonts, spacing, favicon, page title, and meta description live
    - **Export** — Download a clean copy of the current page (no editor code)
    - **Publish** — Push all pages to GitHub and deploy
 
-8. Hover over any section to reveal the **⟳ Reformat** button (change layout with AI while keeping content) and the **✕ Delete Section** button.
+9. Hover over any section to reveal the **⟳ Reformat** button (change layout with AI while keeping content) and the **✕ Delete Section** button.
 
-9. Hover the navigation bar to reveal **⟳ Reformat Nav** — restructure it with AI; changes sync to all pages automatically.
+10. Hover the navigation bar to reveal **⟳ Reformat Nav** — restructure it with AI; changes sync to all pages automatically.
 
-10. Click **Publish** when ready — all pages and the page inventory are published together.
+11. Click **Publish** when ready — all pages and the page inventory are published together.
 
 ---
 
