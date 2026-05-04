@@ -102,7 +102,7 @@ Edit anything:
 
 - Click any text and type
 - Select text for the formatting toolbar (bold, italic, color, font, size, code, link)
-- Click any image to replace it
+- Click any image or video to replace it
 - Hover sections for **⟳ Reformat**, **✕ Delete**, or **+ Add Section** between them
 - Click **Theme** in the toolbar for colors, fonts, spacing, favicon, page title, meta description
 - Click **Pages** (multi-page only) to add AI-generated pages or navigate between them
@@ -133,6 +133,8 @@ GitHub shows a banner: _"Your site is live at https://your-username.github.io/yo
 
 **Images** — click any `data-editable-image` element to replace it. The file is written to your local `assets/` folder and queued for GitHub upload on the next publish.
 
+**Videos** — click any `data-editable-video` element to replace the target YouTube video.
+
 **Sections** — hover any section to reveal its controls.
 
 - Hover between sections → **+ Add Section** (AI-generate a themed new section)
@@ -162,13 +164,13 @@ GitHub shows a banner: _"Your site is live at https://your-username.github.io/yo
 
 GitQi uses data attributes to identify editable regions. The AI-generated HTML includes them automatically; if you're hand-authoring, here's the reference.
 
-| Attribute             | Applied to       | Purpose                                                                                                             |
-| --------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `data-zone`           | `<section>`      | Marks a top-level editable section. Value is a slug, e.g. `"hero"`. Also used as the element `id` for anchor links. |
-| `data-zone-label`     | `<section>`      | Human-readable label shown in the delete confirmation, e.g. `"Hero"`.                                               |
-| `data-editable`       | Any text element | Makes the element directly editable via `contenteditable`.                                                          |
-| `data-editable-image` | `<img>`          | Makes the image replaceable by clicking.                                                                            |
-| `data-editable-video` | `<div>` wrapping a YouTube `<iframe>` | Makes the video replaceable. Click the wrapper → paste any YouTube URL (watch / `youtu.be` / embed / shorts). |
+| Attribute             | Applied to                            | Purpose                                                                                                             |
+| --------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `data-zone`           | `<section>`                           | Marks a top-level editable section. Value is a slug, e.g. `"hero"`. Also used as the element `id` for anchor links. |
+| `data-zone-label`     | `<section>`                           | Human-readable label shown in the delete confirmation, e.g. `"Hero"`.                                               |
+| `data-editable`       | Any text element                      | Makes the element directly editable via `contenteditable`.                                                          |
+| `data-editable-image` | `<img>`                               | Makes the image replaceable by clicking.                                                                            |
+| `data-editable-video` | `<div>` wrapping a YouTube `<iframe>` | Makes the video replaceable. Click the wrapper → paste any YouTube URL (watch / `youtu.be` / embed / shorts).       |
 
 **Minimal example:**
 
@@ -195,14 +197,18 @@ Two script tags must appear in `<head>` (after the `<style>` block) for edit mod
 
 ## Multi-page sites
 
-Multi-page sites use a `gitqi-pages.json` manifest in the site folder alongside the HTML files:
+Multi-page sites use a GitQi managed `gitqi-pages.json` manifest in the site folder alongside the HTML files:
 
 ```json
 {
   "pages": [
     { "file": "index.html", "title": "Home — My Site", "navLabel": "Home" },
     { "file": "about.html", "title": "About — My Site", "navLabel": "About" },
-    { "file": "services.html", "title": "Services — My Site", "navLabel": "Services" }
+    {
+      "file": "services.html",
+      "title": "Services — My Site",
+      "navLabel": "Services"
+    }
   ]
 }
 ```
@@ -214,11 +220,14 @@ GitQi creates and maintains this file automatically — it's machine-managed. Th
 Synced site-wide:
 
 - `<nav>` (including nav-specific CSS in `<style id="__gitqi-nav-styles">`)
+- `<footer>` (falling back to `[data-zone="footer"]`, including its per-section style block when present)
 - Main `<style>` block (CSS variables + base styles edited via the Theme panel)
 - `<link rel="icon">` and `<link rel="apple-touch-icon">` (favicon)
 - Google Fonts `<link>`s (plus their preconnect links)
 
 When the nav is synced, the "current page" highlight is re-targeted for each destination: the link matching that page gets the active marker; every other link is cleared. Recognised markers are the `aria-current` attribute and the CSS classes `active`, `current`, `is-active`, `is-current`, and `selected`.
+
+The footer is copied verbatim — no active-link retargeting, since footers don't typically carry per-page "current" state. Because the footer is replicated across every page, it's pinned at the bottom in the editor: the **⧉ Duplicate** and **↑ / ↓** move controls are suppressed for whatever element matches `<footer>` (or `[data-zone="footer"]`). Reformat and Delete still apply, and changes propagate to every page on the next auto-save.
 
 Left page-specific: `<title>`, `<meta name="description">`, `<meta name="keywords">`.
 
