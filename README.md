@@ -179,6 +179,18 @@ GitQi uses data attributes to identify editable regions. The AI-generated HTML i
   <h2 data-editable>About Me</h2>
   <p data-editable>Replace this with your own text.</p>
   <img src="./assets/placeholder.jpg" data-editable-image alt="Profile photo" />
+  <div
+    data-editable-video
+    style="position: relative; padding-bottom: 56.25%; height: 0;"
+  >
+    <iframe
+      src="https://www.youtube.com/embed/M7lc1UVf-VE"
+      style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"
+      frameborder="0"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+      allowfullscreen
+    ></iframe>
+  </div>
 </section>
 ```
 
